@@ -50,7 +50,7 @@ public class AnchorManager {
             //world:x,y,z:pitch:yaw
             Location anchorLocation = plugin.getLocationManipulation().stringToLocation(anchorsSection.getString(key, ""));
             if (anchorLocation != null) {
-                Logging.info("Loading anchor:  '%s'...", key);
+                Logging.config("Loading anchor:  '%s'...", key);
                 this.anchors.put(key, anchorLocation);
             } else {
                 Logging.warning("The location for anchor '%s' is INVALID.", key);
@@ -140,8 +140,17 @@ public class AnchorManager {
             if (ancLoc == null) {
                 continue;
             }
-            if (p.hasPermission("multiverse.access." + ancLoc.getWorld().getName())) {
+            String worldPerm = "multiverse.access." + ancLoc.getWorld().getName();
+            // Add to the list if we're not enforcing access
+            // OR
+            // We are enforcing access and the user has the permission.
+            if (!this.plugin.getMVConfig().getEnforceAccess() ||
+                    (this.plugin.getMVConfig().getEnforceAccess() && p.hasPermission(worldPerm))) {
                 myAnchors.add(anchor);
+            } else {
+                Logging.finer(String.format("Not adding anchor %s to the list, user %s doesn't have the %s " +
+                        "permission and 'enforceaccess' is enabled!",
+                        anchor, p.getName(), worldPerm));
             }
         }
         return Collections.unmodifiableSet(myAnchors);

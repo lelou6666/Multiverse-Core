@@ -121,6 +121,18 @@ public interface MultiverseCoreConfig extends ConfigurationSerializable {
      * @return prefixChat.
      */
     boolean getPrefixChat();
+    
+    /**
+     * Sets prefixChatFormat.
+     * @param prefixChatFormat The new value.
+     */
+    void setPrefixChatFormat(String prefixChatFormat);
+
+    /**
+     * Gets prefixChatFormat.
+     * @return prefixChatFormat.
+     */
+    String getPrefixChatFormat();
 
     /**
      * Sets enforceAccess.
@@ -145,4 +157,46 @@ public interface MultiverseCoreConfig extends ConfigurationSerializable {
      * @return useasyncchat.
      */
     boolean getUseAsyncChat();
+
+    /**
+     * Sets whether to suppress startup messages.
+     *
+     * @param silentStart true to suppress messages.
+     */
+    void setSilentStart(boolean silentStart);
+
+    /**
+     * Whether we are suppressing startup messages.
+     *
+     * @return true if we are suppressing startup messages.
+     */
+    boolean getSilentStart();
+
+    /**
+     * Sets whether or not to let Bukkit determine portal search radius on its own or if Multiverse should give input.
+     *
+     * @param useDefaultPortalSearch True to let Bukkit determine portal search radius on its own.
+     */
+    void setUseDefaultPortalSearch(boolean useDefaultPortalSearch);
+
+    /**
+     * Gets whether or not Bukkit will be determining portal search radius on its own or if Multiverse should help.
+     *
+     * @return True means Bukkit will use its own default values.
+     */
+    boolean isUsingDefaultPortalSearch();
+
+    /**
+     * Sets the radius at which vanilla style portals will be searched for to connect to worlds together.
+     *
+     * @param searchRadius The portal search radius.
+     */
+    void setPortalSearchRadius(int searchRadius);
+
+    /**
+     * Gets the radius at which vanilla style portals will be searched for to connect to worlds together.
+     *
+     * @return The portal search radius.
+     */
+    int getPortalSearchRadius();
 }
