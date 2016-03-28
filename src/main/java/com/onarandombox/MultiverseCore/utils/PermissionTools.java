@@ -7,7 +7,6 @@
 
 package com.onarandombox.MultiverseCore.utils;
 
-import com.fernferret.allpay.GenericBank;
 import com.onarandombox.MultiverseCore.MultiverseCore;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
 import org.bukkit.command.CommandSender;
@@ -135,51 +134,50 @@ public class PermissionTools {
 
         // Only check payments if it's a different world:
         if (!toWorld.equals(fromWorld)) {
+            final double price = toWorld.getPrice();
             // Don't bother checking economy stuff if it doesn't even cost to enter.
-            if (toWorld.getPrice() == 0D) {
+            if (price == 0D) {
                 return true;
             }
             // If the player does not have to pay, return now.
             if (Permissions.COST_EXEMPT.hasPermission(teleporter, toWorld.getName())) {
                 return true;
             }
-            final boolean usingVault;
-            final String formattedAmount;
-            if (toWorld.getCurrency() <= 0 && plugin.getVaultHandler().getEconomy() != null) {
-                usingVault = true;
-                formattedAmount = plugin.getVaultHandler().getEconomy().format(toWorld.getPrice());
-            } else {
-                usingVault = false;
-                formattedAmount = this.plugin.getBank().getFormattedAmount(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency());
-            }
-            String errString = "You need " + formattedAmount + " to send " + teleportee + " to " + toWorld.getColoredWorldString();
-            if (teleportee.equals(teleporter)) {
-                errString = "You need " + formattedAmount + " to enter " + toWorld.getColoredWorldString();
-            }
-            if (usingVault) {
-                if (!plugin.getVaultHandler().getEconomy().has(teleporterPlayer.getName(), toWorld.getPrice())) {
-                    return false;
-                } else if (pay) {
-                    if (toWorld.getPrice() < 0D) {
-                        plugin.getVaultHandler().getEconomy().depositPlayer(teleporterPlayer.getName(), toWorld.getPrice() * -1D);
+
+            final MVEconomist economist = plugin.getEconomist();
+            final int currency = toWorld.getCurrency();
+            final String formattedAmount = economist.formatPrice(price, currency);
+
+            if (economist.isPlayerWealthyEnough(teleporterPlayer, price, currency)) {
+                if (pay) {
+                    if (price < 0D) {
+                        economist.deposit(teleporterPlayer, -price, currency);
                     } else {
-                        plugin.getVaultHandler().getEconomy().withdrawPlayer(teleporterPlayer.getName(), toWorld.getPrice());
+                        economist.withdraw(teleporterPlayer, price, currency);
                     }
+                    sendTeleportPaymentMessage(economist, teleporterPlayer, teleportee, toWorld.getColoredWorldString(), price, currency);
                 }
             } else {
-                GenericBank bank = plugin.getBank();
-                if (!bank.hasEnough(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency(), errString)) {
-                    return false;
-                } else if (pay) {
-                    if (toWorld.getPrice() < 0D) {
-                        bank.give(teleporterPlayer, toWorld.getPrice() * -1D, toWorld.getCurrency());
-                    } else {
-                        bank.take(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency());
-                    }
+                if (teleportee.equals(teleporter)) {
+                    teleporterPlayer.sendMessage(economist.getNSFMessage(currency,
+                            "You need " + formattedAmount + " to enter " + toWorld.getColoredWorldString()));
+                } else {
+                    teleporterPlayer.sendMessage(economist.getNSFMessage(currency,
+                            "You need " + formattedAmount + " to send " + teleportee.getName() + " to " + toWorld.getColoredWorldString()));
                 }
+                return false;
             }
         }
         return true;
+    }
+
+    private void sendTeleportPaymentMessage (MVEconomist economist, Player teleporterPlayer, Player teleportee, String toWorld, double price, int currency) {
+        price = Math.abs(price);
+        if (teleporterPlayer.equals(teleportee)) {
+            teleporterPlayer.sendMessage("You were " + (price > 0D ? "charged " : "given ") + economist.formatPrice(price, currency) + " for teleporting to " + toWorld);
+        } else {
+            teleporterPlayer.sendMessage("You were " + (price > 0D ? "charged " : "given ") + economist.formatPrice(price, currency) + " for teleporting " + teleportee.getName() + " to " + toWorld);
+        }
     }
 
 

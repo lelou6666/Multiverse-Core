@@ -140,8 +140,21 @@ public class AnchorManager {
             if (ancLoc == null) {
                 continue;
             }
+<<<<<<< HEAD
             if (Permissions.ACCESS.hasPermission(p, ancLoc.getWorld().getName())) {
+=======
+            String worldPerm = "multiverse.access." + ancLoc.getWorld().getName();
+            // Add to the list if we're not enforcing access
+            // OR
+            // We are enforcing access and the user has the permission.
+            if (!this.plugin.getMVConfig().getEnforceAccess() ||
+                    (this.plugin.getMVConfig().getEnforceAccess() && p.hasPermission(worldPerm))) {
+>>>>>>> refs/remotes/Multiverse/master
                 myAnchors.add(anchor);
+            } else {
+                Logging.finer(String.format("Not adding anchor %s to the list, user %s doesn't have the %s " +
+                        "permission and 'enforceaccess' is enabled!",
+                        anchor, p.getName(), worldPerm));
             }
         }
         return Collections.unmodifiableSet(myAnchors);

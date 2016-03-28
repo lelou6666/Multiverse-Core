@@ -29,6 +29,11 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/*
+ * This is a property class, I think we don't need that much javadoc.
+ * BEGIN CHECKSTYLE-SUPPRESSION: Javadoc
+ */
+
 @SerializableAs("MVWorld")
 public class WorldProperties extends SerializationConfig {
 
@@ -36,7 +41,9 @@ public class WorldProperties extends SerializationConfig {
 
     static {
         PROPERTY_ALIASES = new HashMap<String, String>();
-        PROPERTY_ALIASES.put("curr", "currency");
+        PROPERTY_ALIASES.put("curr", "entryfee.currency");
+        PROPERTY_ALIASES.put("currency", "entryfee.currency");
+        PROPERTY_ALIASES.put("price", "entryfee.amount");
         PROPERTY_ALIASES.put("scaling", "scale");
         PROPERTY_ALIASES.put("aliascolor", "color");
         PROPERTY_ALIASES.put("heal", "autoHeal");
@@ -57,12 +64,17 @@ public class WorldProperties extends SerializationConfig {
         PROPERTY_ALIASES.put("allowfly", "allowFlight");
     }
 
+    private final boolean keepSpawnFallback;
+
     public WorldProperties(Map<String, Object> values) {
         super(values);
+        Object keepSpawnObject = values.get("keepSpawnInMemory");
+        keepSpawnFallback = keepSpawnObject == null || Boolean.parseBoolean(keepSpawnObject.toString());
     }
 
     public WorldProperties() {
         super();
+        keepSpawnFallback = true;
     }
 
     public WorldProperties(final boolean fixSpawn, final Environment environment) {
@@ -71,6 +83,7 @@ public class WorldProperties extends SerializationConfig {
             this.adjustSpawn = false;
         }
         setScaling(getDefaultScale(environment));
+        keepSpawnFallback = true;
     }
 
     void setMVWorld(MVWorld world) {
@@ -235,7 +248,7 @@ public class WorldProperties extends SerializationConfig {
     @Property(serializor = EnumPropertySerializor.class, description = "Sorry, 'style' must be a valid style-name.")
     private volatile EnglishChatStyle style;
     @Property(description = "Sorry, 'pvp' must either be: true or false.", virtualType = Boolean.class, persistVirtual = true)
-    volatile VirtualProperty<Boolean> pvp;
+    volatile VirtualProperty<Boolean> pvp; // SUPPRESS CHECKSTYLE: VisibilityModifier
     @Property(description = "Scale must be a positive double value. ex: 2.3")
     private volatile double scale;
     @Property(description = "You must set this to the NAME not alias of a world.")
@@ -244,7 +257,7 @@ public class WorldProperties extends SerializationConfig {
     private volatile boolean allowWeather;
     @Property(serializor = DifficultyPropertySerializor.class, virtualType = Difficulty.class, persistVirtual = true,
             description = "Difficulty must be set as one of the following: peaceful easy normal hard")
-    volatile VirtualProperty<Difficulty> difficulty;
+    volatile VirtualProperty<Difficulty> difficulty; // SUPPRESS CHECKSTYLE: VisibilityModifier
     @Property(description = "Sorry, 'animals' must either be: true or false.")
     private volatile SpawnSettings spawning;
     @Property
@@ -260,12 +273,12 @@ public class WorldProperties extends SerializationConfig {
     @Property(serializor = GameModePropertySerializor.class, description = "GameMode must be set as one of the following: survival creative")
     private volatile GameMode gameMode;
     @Property(description = "Sorry, this must either be: true or false.", virtualType = Boolean.class, persistVirtual = true)
-    volatile VirtualProperty<Boolean> keepSpawnInMemory;
+    volatile VirtualProperty<Boolean> keepSpawnInMemory; // SUPPRESS CHECKSTYLE: VisibilityModifier
     @Property
-    volatile SpawnLocation spawnLocation;
+    volatile SpawnLocation spawnLocation; // SUPPRESS CHECKSTYLE: VisibilityModifier
     @Property(virtualType = Location.class,
             description = "There is no help available for this variable. Go bug Rigby90 about it.")
-    volatile VirtualProperty<Location> spawn;
+    volatile VirtualProperty<Location> spawn; // SUPPRESS CHECKSTYLE: VisibilityModifier
     @Property(description = "Set this to false ONLY if you don't want this world to load itself on server restart.")
     private volatile boolean autoLoad;
     @Property(description = "If a player dies in this world, shoudld they go to their bed?")
@@ -274,11 +287,11 @@ public class WorldProperties extends SerializationConfig {
     private volatile List<String> worldBlacklist;
     @Property(serializor = TimePropertySerializor.class, virtualType = Long.class,
             description = "Set the time to whatever you want! (Will NOT freeze time)")
-    volatile VirtualProperty<Long> time;
+    volatile VirtualProperty<Long> time; // SUPPRESS CHECKSTYLE: VisibilityModifier
     @Property
-    volatile Environment environment;
+    volatile Environment environment; // SUPPRESS CHECKSTYLE: VisibilityModifier
     @Property
-    volatile long seed;
+    volatile long seed; // SUPPRESS CHECKSTYLE: VisibilityModifier
     @Property
     private volatile String generator;
     @Property
@@ -361,7 +374,7 @@ public class WorldProperties extends SerializationConfig {
         this.flushPendingVPropChanges();
     }
 
-    String getAlias() {
+    public String getAlias() {
         return this.alias;
     }
 
@@ -520,7 +533,14 @@ public class WorldProperties extends SerializationConfig {
     }
 
     public boolean isKeepingSpawnInMemory() {
-        return this.keepSpawnInMemory.get();
+        if (keepSpawnInMemory == null) {
+            return keepSpawnFallback;
+        }
+        try {
+            return this.keepSpawnInMemory.get();
+        } catch (IllegalStateException e) {
+            return keepSpawnFallback;
+        }
     }
 
     public void setKeepSpawnInMemory(boolean value) {
@@ -547,7 +567,7 @@ public class WorldProperties extends SerializationConfig {
         return this.difficulty.get();
     }
 
-    @Deprecated
+    @Deprecated // SUPPRESS CHECKSTYLE: Deprecated
     public boolean setDifficulty(String difficulty) {
         return this.setPropertyUnchecked("difficulty", difficulty);
     }

@@ -177,8 +177,12 @@ public class MVPlayerListener implements Listener {
                 + teleporterName + "', fetched from name '" + teleportee.getName() + "'");
         MultiverseWorld fromWorld = this.worldManager.getMVWorld(event.getFrom().getWorld().getName());
         MultiverseWorld toWorld = this.worldManager.getMVWorld(event.getTo().getWorld().getName());
-        if (fromWorld == null || toWorld == null)
+        if (toWorld == null) {
+            this.plugin.log(Level.FINE, "Player '" + teleportee.getName() + "' is teleporting to world '"
+                    + event.getTo().getWorld().getName() + "' which is not managed by Multiverse-Core.  No further "
+                    + "actions will be taken by Multiverse-Core.");
             return;
+        }
         if (event.getFrom().getWorld().equals(event.getTo().getWorld())) {
             // The player is Teleporting to the same world.
             this.plugin.log(Level.FINER, "Player '" + teleportee.getName() + "' is teleporting to the same world.");
@@ -301,7 +305,7 @@ public class MVPlayerListener implements Listener {
                     + "' was allowed to go to '" + event.getTo().getWorld().getName()
                     + "' because enforceaccess is off.");
         }
-        if (!plugin.getMVConfig().isUsingDefaultPortalSearch()) {
+        if (!plugin.getMVConfig().isUsingDefaultPortalSearch() && event.getPortalTravelAgent() != null) {
             event.getPortalTravelAgent().setSearchRadius(plugin.getMVConfig().getPortalSearchRadius());
         }
     }
@@ -337,23 +341,39 @@ public class MVPlayerListener implements Listener {
     public void handleGameModeAndFlight(final Player player, final MultiverseWorld world) {
         // We perform this task one tick later to MAKE SURE that the player actually reaches the
         // destination world, otherwise we'd be changing the player mode if they havent moved anywhere.
-        if (!this.pt.playerCanIgnoreGameModeRestriction(world, player)) {
-            this.plugin.getServer().getScheduler().scheduleSyncDelayedTask(this.plugin,
+        this.plugin.getServer().getScheduler().scheduleSyncDelayedTask(this.plugin,
                 new Runnable() {
                     @Override
                     public void run() {
-                        // Check that the player is in the new world and they haven't been teleported elsewhere or the event cancelled.
-                        if (player.getWorld() == world.getCBWorld()) {
-                            Logging.fine("Handling gamemode for player: %s, Changing to %s", player.getName(), world.getGameMode().toString());
-                            Logging.finest("From World: %s", player.getWorld());
-                            Logging.finest("To World: %s", world);
-                            player.setGameMode(world.getGameMode());
+                        if (!MVPlayerListener.this.pt.playerCanIgnoreGameModeRestriction(world, player)) {
+                            // Check that the player is in the new world and they haven't been teleported elsewhere or the event cancelled.
+                            if (player.getWorld() == world.getCBWorld()) {
+                                Logging.fine("Handling gamemode for player: %s, Changing to %s", player.getName(), world.getGameMode().toString());
+                                Logging.finest("From World: %s", player.getWorld());
+                                Logging.finest("To World: %s", world);
+                                player.setGameMode(world.getGameMode());
+                                // Check if their flight mode should change
+                                // TODO need a override permission for this
+                                if (player.getAllowFlight() && !world.getAllowFlight() && player.getGameMode() != GameMode.CREATIVE) {
+                                    player.setAllowFlight(false);
+                                    if (player.isFlying()) {
+                                        player.setFlying(false);
+                                    }
+                                } else if (world.getAllowFlight()) {
+                                    if (player.getGameMode() == GameMode.CREATIVE) {
+                                        player.setAllowFlight(true);
+                                    }
+                                }
+                            } else {
+                                Logging.fine("The gamemode/allowfly was NOT changed for player '%s' because he is now in world '%s' instead of world '%s'",
+                                        player.getName(), player.getWorld().getName(), world.getName());
+                            }
                         } else {
-                            Logging.fine("The gamemode was NOT changed for player '%s' because he is now in world '%s' instead of world '%s'",
-                                    player.getName(), player.getWorld().getName(), world.getName());
+                            MVPlayerListener.this.plugin.log(Level.FINE, "Player: " + player.getName() + " is IMMUNE to gamemode changes!");
                         }
                     }
                 }, 1L);
+<<<<<<< HEAD
         } else {
             this.plugin.log(Level.FINE, "Player: " + player.getName() + " is IMMUNE to gamemode changes!");
         }
@@ -370,5 +390,7 @@ public class MVPlayerListener implements Listener {
                 player.setAllowFlight(true);
             }
         }
+=======
+>>>>>>> refs/remotes/Multiverse/master
     }
 }

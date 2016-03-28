@@ -12,6 +12,7 @@ import com.onarandombox.MultiverseCore.api.BlockSafety;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
 import com.onarandombox.MultiverseCore.api.SafeTTeleporter;
 import com.onarandombox.MultiverseCore.configuration.SpawnLocation;
+import com.onarandombox.MultiverseCore.configuration.SpawnSettings;
 import com.onarandombox.MultiverseCore.configuration.WorldPropertyValidator;
 import com.onarandombox.MultiverseCore.enums.AllowedPortalType;
 import com.onarandombox.MultiverseCore.enums.EnglishChatColor;
@@ -50,7 +51,7 @@ public class MVWorld implements MultiverseWorld {
     private final MultiverseCore plugin; // Hold the Plugin Instance.
     private final String name; // The Worlds Name, EG its folder name.
     private final UUID worldUID;
-    final WorldProperties props;
+    private final WorldProperties props;
 
     public MVWorld(MultiverseCore plugin, World world, WorldProperties properties) {
         this(plugin, world, properties, true);
@@ -182,14 +183,22 @@ public class MVWorld implements MultiverseWorld {
         //this.props.validate();
     }
 
+    /**
+     * This method is here to provide a stopgap until the add/remove/clear methods are implemented with
+     * SerializationConfig.
+     */
+    public void validateEntitySpawns() {
+        setAllowAnimalSpawn(canAnimalsSpawn());
+        setAllowMonsterSpawn(canMonstersSpawn());
+    }
+
     private void validateProperties() {
         setPVPMode(isPVPEnabled());
         setDifficulty(getDifficulty());
         setKeepSpawnInMemory(isKeepingSpawnInMemory());
         setScaling(getScaling());
         setRespawnToWorld(this.props.getRespawnToWorld());
-        setAllowAnimalSpawn(canAnimalsSpawn());
-        setAllowMonsterSpawn(canMonstersSpawn());
+        validateEntitySpawns();
         setGameMode(getGameMode());
     }
 
@@ -244,10 +253,10 @@ public class MVWorld implements MultiverseWorld {
     /**
      * Used to apply the spawning-property.
      */
-    private final class SpawningPropertyValidator extends WorldPropertyValidator<Boolean> {
+    private final class SpawningPropertyValidator extends WorldPropertyValidator<SpawnSettings> {
         @Override
-        public Boolean validateChange(String property, Boolean newValue, Boolean oldValue,
-                MVWorld object) throws ChangeDeniedException {
+        public SpawnSettings validateChange(String property, SpawnSettings newValue, SpawnSettings oldValue,
+                                      MVWorld object) throws ChangeDeniedException {
             boolean allowMonsters, allowAnimals;
             if (getAnimalList().isEmpty()) {
                 allowAnimals = canAnimalsSpawn();
@@ -408,10 +417,47 @@ public class MVWorld implements MultiverseWorld {
         return location;
     }
 
+<<<<<<< HEAD
+=======
+    private void addToUpperLists(Permission perm) {
+        Permission all = this.plugin.getServer().getPluginManager().getPermission("multiverse.*");
+        Permission allWorlds = this.plugin.getServer().getPluginManager().getPermission("multiverse.access.*");
+        Permission allExemption = this.plugin.getServer().getPluginManager().getPermission("multiverse.exempt.*");
+
+        if (allWorlds == null) {
+            allWorlds = new Permission("multiverse.access.*");
+            this.plugin.getServer().getPluginManager().addPermission(allWorlds);
+        }
+        allWorlds.getChildren().put(perm.getName(), true);
+        if (allExemption == null) {
+            allExemption = new Permission("multiverse.exempt.*");
+            this.plugin.getServer().getPluginManager().addPermission(allExemption);
+        }
+        allExemption.getChildren().put(this.exempt.getName(), true);
+        if (all == null) {
+            all = new Permission("multiverse.*");
+            this.plugin.getServer().getPluginManager().addPermission(all);
+        }
+        all.getChildren().put("multiverse.access.*", true);
+        all.getChildren().put("multiverse.exempt.*", true);
+
+        this.plugin.getServer().getPluginManager().recalculatePermissionDefaults(all);
+        this.plugin.getServer().getPluginManager().recalculatePermissionDefaults(allWorlds);
+    }
+
+    /**
+     * Copies all properties from another {@link MVWorld} object.
+     * @param other The other world object.
+     */
+>>>>>>> refs/remotes/Multiverse/master
     public void copyValues(MVWorld other) {
         props.copyValues(other.props);
     }
 
+    /**
+     * Copies all properties from a {@link WorldProperties} object.
+     * @param other The world properties object.
+     */
     public void copyValues(WorldProperties other) {
         props.copyValues(other);
     }
@@ -472,6 +518,7 @@ public class MVWorld implements MultiverseWorld {
         if (list == null)
             return false;
         list.clear();
+        validateEntitySpawns();
         return true;
     }
 
@@ -487,6 +534,7 @@ public class MVWorld implements MultiverseWorld {
         if (list == null)
             return false;
         list.add(value);
+        validateEntitySpawns();
         return true;
     }
 
@@ -502,6 +550,7 @@ public class MVWorld implements MultiverseWorld {
         if (list == null)
             return false;
         list.remove(value);
+        validateEntitySpawns();
         return true;
     }
 

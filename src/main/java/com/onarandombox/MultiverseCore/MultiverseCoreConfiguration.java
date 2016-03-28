@@ -1,12 +1,10 @@
 package com.onarandombox.MultiverseCore;
 
-import com.dumptruckman.minecraft.util.Logging;
-import com.onarandombox.MultiverseCore.api.MultiverseCoreConfig;
-import me.main__.util.SerializationConfig.NoSuchPropertyException;
-import me.main__.util.SerializationConfig.Property;
-import me.main__.util.SerializationConfig.SerializationConfig;
+import com.dumptruckman.minecraft.util.*;
+import com.onarandombox.MultiverseCore.api.*;
+import me.main__.util.SerializationConfig.*;
 
-import java.util.Map;
+import java.util.*;
 
 /**
  * Our configuration.
@@ -43,6 +41,8 @@ public class MultiverseCoreConfiguration extends SerializationConfig implements 
     private volatile boolean enforceaccess;
     @Property
     private volatile boolean prefixchat;
+    @Property
+    private volatile String prefixchatformat;
     @Property
     private volatile boolean useasyncchat;
     @Property
@@ -87,6 +87,7 @@ public class MultiverseCoreConfiguration extends SerializationConfig implements 
         enforceaccess = false;
         useasyncchat = true;
         prefixchat = true;
+        prefixchatformat = "[%world%]%chat%";
         teleportintercept = true;
         firstspawnoverride = true;
         displaypermerrors = true;
@@ -96,7 +97,7 @@ public class MultiverseCoreConfiguration extends SerializationConfig implements 
         this.version = 2.9;
         silentstart = false;
         defaultportalsearch = false;
-        portalsearchradius = 16;
+        portalsearchradius = 128;
         // END CHECKSTYLE-SUPPRESSION: MagicNumberCheck
     }
 
@@ -144,6 +145,22 @@ public class MultiverseCoreConfiguration extends SerializationConfig implements 
     @Override
     public void setPrefixChat(boolean prefixChat) {
         this.prefixchat = prefixChat;
+    }
+    
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public String getPrefixChatFormat() {
+        return this.prefixchatformat;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setPrefixChatFormat(String prefixChatFormat) {
+        this.prefixchatformat = prefixChatFormat;
     }
 
     /**
