@@ -7,7 +7,6 @@
 
 package com.onarandombox.MultiverseCore.utils;
 
-import com.fernferret.allpay.GenericBank;
 import com.onarandombox.MultiverseCore.MultiverseCore;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
 import org.bukkit.command.CommandSender;
@@ -135,28 +134,50 @@ public class PermissionTools {
 
         // Only check payments if it's a different world:
         if (!toWorld.equals(fromWorld)) {
+            final double price = toWorld.getPrice();
             // Don't bother checking economy stuff if it doesn't even cost to enter.
-            if (toWorld.getPrice() == 0D) {
+            if (price == 0D) {
                 return true;
             }
             // If the player does not have to pay, return now.
             if (this.plugin.getMVPerms().hasPermission(teleporter, toWorld.getExemptPermission().getName(), true)) {
                 return true;
             }
-            GenericBank bank = plugin.getBank();
-            String errString = "You need " + bank.getFormattedAmount(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency())
-                    + " to send " + teleportee + " to " + toWorld.getColoredWorldString();
-            if (teleportee.equals(teleporter)) {
-                errString = "You need " + bank.getFormattedAmount(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency())
-                        + " to enter " + toWorld.getColoredWorldString();
-            }
-            if (!bank.hasEnough(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency(), errString)) {
+
+            final MVEconomist economist = plugin.getEconomist();
+            final int currency = toWorld.getCurrency();
+            final String formattedAmount = economist.formatPrice(price, currency);
+
+            if (economist.isPlayerWealthyEnough(teleporterPlayer, price, currency)) {
+                if (pay) {
+                    if (price < 0D) {
+                        economist.deposit(teleporterPlayer, -price, currency);
+                    } else {
+                        economist.withdraw(teleporterPlayer, price, currency);
+                    }
+                    sendTeleportPaymentMessage(economist, teleporterPlayer, teleportee, toWorld.getColoredWorldString(), price, currency);
+                }
+            } else {
+                if (teleportee.equals(teleporter)) {
+                    teleporterPlayer.sendMessage(economist.getNSFMessage(currency,
+                            "You need " + formattedAmount + " to enter " + toWorld.getColoredWorldString()));
+                } else {
+                    teleporterPlayer.sendMessage(economist.getNSFMessage(currency,
+                            "You need " + formattedAmount + " to send " + teleportee.getName() + " to " + toWorld.getColoredWorldString()));
+                }
                 return false;
-            } else if (pay) {
-                bank.give(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency());
             }
         }
         return true;
+    }
+
+    private void sendTeleportPaymentMessage (MVEconomist economist, Player teleporterPlayer, Player teleportee, String toWorld, double price, int currency) {
+        price = Math.abs(price);
+        if (teleporterPlayer.equals(teleportee)) {
+            teleporterPlayer.sendMessage("You were " + (price > 0D ? "charged " : "given ") + economist.formatPrice(price, currency) + " for teleporting to " + toWorld);
+        } else {
+            teleporterPlayer.sendMessage("You were " + (price > 0D ? "charged " : "given ") + economist.formatPrice(price, currency) + " for teleporting " + teleportee.getName() + " to " + toWorld);
+        }
     }
 
 
@@ -233,6 +254,32 @@ public class PermissionTools {
             }
         }
         return true;
+    }
+
+    /**
+     * Checks to see if a player can bypass the player limit.
+     *
+     * @param toWorld The world travelling to.
+     * @param teleporter The player that initiated the teleport.
+     * @param teleportee The player travelling.
+     * @return True if they can bypass the player limit.
+     */
+    public boolean playerCanBypassPlayerLimit(MultiverseWorld toWorld, CommandSender teleporter, Player teleportee) {
+        if (teleporter == null) {
+            teleporter = teleportee;
+        }
+
+        if (!(teleporter instanceof Player)) {
+            return true;
+        }
+
+        MVPermissions perms = plugin.getMVPerms();
+        if (perms.hasPermission(teleportee, "mv.bypass.playerlimit." + toWorld.getName(), false)) {
+            return true;
+        } else {
+            teleporter.sendMessage("The world " + toWorld.getColoredWorldString() + " is full");
+            return false;
+        }
     }
 
     /**
