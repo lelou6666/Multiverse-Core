@@ -9,7 +9,6 @@ package com.onarandombox.MultiverseCore.api;
 
 import com.onarandombox.MultiverseCore.enums.AllowedPortalType;
 import com.onarandombox.MultiverseCore.exceptions.PropertyDoesNotExistException;
-
 import org.bukkit.ChatColor;
 import org.bukkit.Difficulty;
 import org.bukkit.GameMode;
@@ -630,6 +629,22 @@ public interface MultiverseWorld {
     void setBedRespawn(boolean autoLoad);
 
     /**
+     * Sets the player limit for this world after which players without an override
+     * permission node will not be allowed in. A value of -1 or less signifies no limit
+     *
+     * @param limit The new limit
+     */
+    void setPlayerLimit(int limit);
+
+    /**
+     * Gets the player limit for this world after which players without an override
+     * permission node will not be allowed in. A value of -1 or less signifies no limit
+     *
+     * @return The player limit
+     */
+    int getPlayerLimit();
+
+    /**
      * Same as {@link #getTime()}, but returns a string.
      * @return The time as a short string: 12:34pm
      */
@@ -690,4 +705,18 @@ public interface MultiverseWorld {
      * @return All property names, with alternating colors.
      */
     String getAllPropertyNames();
+
+    /**
+     * Whether or not players are allowed to fly in this world.
+     *
+     * @return True if players allowed to fly in this world.
+     */
+    boolean getAllowFlight();
+
+    /**
+     * Sets whether or not players are allowed to fly in this world.
+     *
+     * @param allowFlight True to allow flight in this world.
+     */
+    void setAllowFlight(final boolean allowFlight);
 }
