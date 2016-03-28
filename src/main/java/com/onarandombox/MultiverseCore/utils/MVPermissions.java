@@ -12,6 +12,7 @@ import com.onarandombox.MultiverseCore.api.MVDestination;
 import com.onarandombox.MultiverseCore.api.MVWorldManager;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
 import com.pneumaticraft.commandhandler.PermissionsInterface;
+import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -43,10 +44,6 @@ public class MVPermissions implements PermissionsInterface {
      * @return True if they should bypass restrictions.
      */
     public boolean canIgnoreGameModeRestriction(Player p, MultiverseWorld w) {
-        if (p.hasPermission("mv.bypass.gamemode.*")) {
-            this.plugin.log(Level.FINER, "Player has mv.bypass.gamemode.* their gamemode is ignored!");
-            return true;
-        }
         return p.hasPermission("mv.bypass.gamemode." + w.getName());
     }
 
@@ -79,6 +76,10 @@ public class MVPermissions implements PermissionsInterface {
      * @return Whether the {@link CommandSender} can travel to the specified {@link Location}.
      */
     public boolean canTravelFromLocation(CommandSender sender, Location location) {
+        // Now The Bed destination can return null now.
+        if (location == null) {
+            return false;
+        }
         if (!(sender instanceof Player)) {
             return true;
         }
@@ -98,7 +99,8 @@ public class MVPermissions implements PermissionsInterface {
      */
     public boolean canEnterWorld(Player p, MultiverseWorld w) {
         // If we're not enforcing access, anyone can enter.
-        if (!MultiverseCore.EnforceAccess) {
+        if (!plugin.getMVConfig().getEnforceAccess()) {
+            this.plugin.log(Level.FINEST, "EnforceAccess is OFF. Player was allowed in " + w.getAlias());
             return true;
         }
         return this.hasPermission(p, "multiverse.access." + w.getName(), false);
@@ -143,6 +145,87 @@ public class MVPermissions implements PermissionsInterface {
     }
 
     /**
+     * Tells a {@link CommandSender} why another {@link CommandSender} can or can not access a certain {@link MVDestination}.
+     * @param asker The {@link CommandSender} that's asking.
+     * @param playerInQuestion The {@link CommandSender} whose permissions we want to know.
+     * @param d The {@link MVDestination}.
+     */
+    public void tellMeWhyICantDoThis(CommandSender asker, CommandSender playerInQuestion, MVDestination d) {
+        boolean cango = true;
+        if (!(playerInQuestion instanceof Player)) {
+            asker.sendMessage(String.format("The console can do %severything%s.", ChatColor.RED, ChatColor.WHITE));
+            return;
+        }
+        Player p = (Player) playerInQuestion;
+        if (d == null) {
+            asker.sendMessage(String.format("The provided Destination is %sNULL%s, and therefore %sINVALID%s.",
+                    ChatColor.RED, ChatColor.WHITE, ChatColor.RED, ChatColor.WHITE));
+            cango = false;
+        }
+        // We know it'll be a player here due to the first line of this method.
+        if (d.getLocation(p) == null) {
+            asker.sendMessage(String.format(
+                    "The player will spawn at an %sindeterminate location%s. Talk to the MV Devs if you see this",
+                    ChatColor.RED, ChatColor.WHITE));
+            cango = false;
+        }
+        String worldName = d.getLocation(p).getWorld().getName();
+        if (!this.worldMgr.isMVWorld(worldName)) {
+            asker.sendMessage(String.format("The destination resides in a world(%s%s%s) that is not managed by Multiverse.",
+                    ChatColor.AQUA, worldName, ChatColor.WHITE));
+            asker.sendMessage(String.format("Type %s/mv import ?%s to see the import command's help page.",
+                    ChatColor.DARK_AQUA, ChatColor.WHITE));
+            cango = false;
+        }
+        if (!this.hasPermission(p, "multiverse.access." + worldName, false)) {
+            asker.sendMessage(String.format("The player (%s%s%s) does not have the required world entry permission (%s%s%s) to go to the destination (%s%s%s).",
+                    ChatColor.AQUA, p.getDisplayName(), ChatColor.WHITE,
+                    ChatColor.GREEN, "multiverse.access." + worldName, ChatColor.WHITE,
+                    ChatColor.DARK_AQUA, d.getName(), ChatColor.WHITE));
+            cango = false;
+        }
+        if (!this.hasPermission(p, d.getRequiredPermission(), false)) {
+            asker.sendMessage(String.format("The player (%s%s%s) does not have the required entry permission (%s%s%s) to go to the destination (%s%s%s).",
+                    ChatColor.AQUA, p.getDisplayName(), ChatColor.WHITE,
+                    ChatColor.GREEN, d.getRequiredPermission(), ChatColor.WHITE,
+                    ChatColor.DARK_AQUA, d.getName(), ChatColor.WHITE));
+            cango = false;
+        }
+        if (cango) {
+            asker.sendMessage(String.format("The player (%s%s%s) CAN go to the destination (%s%s%s).",
+                    ChatColor.AQUA, p.getDisplayName(), ChatColor.WHITE,
+                    ChatColor.DARK_AQUA, d.getName(), ChatColor.WHITE));
+        } else {
+            asker.sendMessage(String.format("The player (%s%s%s) cannot access the destination %s%s%s. Therefore they can't use mvtp at all for this.",
+                    ChatColor.AQUA, p.getDisplayName(), ChatColor.WHITE,
+                    ChatColor.DARK_AQUA, d.getName(), ChatColor.WHITE));
+            return;
+        }
+        if (!this.hasPermission(p, "multiverse.teleport.self." + d.getIdentifier(), false)) {
+            asker.sendMessage(String.format("The player (%s%s%s) does not have the required teleport permission (%s%s%s) to use %s/mvtp %s%s.",
+                    ChatColor.AQUA, p.getDisplayName(), ChatColor.WHITE,
+                    ChatColor.GREEN, "multiverse.teleport.self." + d.getIdentifier(), ChatColor.WHITE,
+                    ChatColor.DARK_AQUA, d.getName(), ChatColor.WHITE));
+        } else {
+            asker.sendMessage(String.format("The player (%s%s%s) has the required teleport permission (%s%s%s) to use %s/mvtp %s%s.",
+                    ChatColor.AQUA, p.getDisplayName(), ChatColor.WHITE,
+                    ChatColor.GREEN, "multiverse.teleport.self." + d.getIdentifier(), ChatColor.WHITE,
+                    ChatColor.DARK_AQUA, d.getName(), ChatColor.WHITE));
+        }
+        if (!this.hasPermission(p, "multiverse.teleport.other." + d.getIdentifier(), false)) {
+            asker.sendMessage(String.format("The player (%s%s%s) does not have the required teleport permission (%s%s%s) to send others to %s%s%s via mvtp.",
+                    ChatColor.AQUA, p.getDisplayName(), ChatColor.WHITE,
+                    ChatColor.GREEN, "multiverse.teleport.other." + d.getIdentifier(), ChatColor.WHITE,
+                    ChatColor.DARK_AQUA, d.getName(), ChatColor.WHITE));
+        } else {
+            asker.sendMessage(String.format("The player (%s%s%s) has required teleport permission (%s%s%s) to send others to %s%s%s via mvtp.",
+                    ChatColor.AQUA, p.getDisplayName(), ChatColor.WHITE,
+                    ChatColor.GREEN, "multiverse.teleport.other." + d.getIdentifier(), ChatColor.WHITE,
+                    ChatColor.DARK_AQUA, d.getName(), ChatColor.WHITE));
+        }
+    }
+
+    /**
      * Check to see if a player has a permission.
      *
      * @param sender       Who is requesting the permission.
@@ -150,6 +233,7 @@ public class MVPermissions implements PermissionsInterface {
      * @param isOpRequired @Deprecated. This is not used for anything anymore.
      * @return True if they have that permission or any parent.
      */
+    @Override
     public boolean hasPermission(CommandSender sender, String node, boolean isOpRequired) {
         if (!(sender instanceof Player)) {
             return true;
@@ -163,26 +247,24 @@ public class MVPermissions implements PermissionsInterface {
         if (node.equals("")) {
             return true;
         }
-        boolean hasPermission = checkActualPermission(sender, node);
 
-        // I consider this a workaround. At the moment, when we add a node AND recalc the permissions, until the perms
-        // plugin reloads, when MV asks the API if a player has a perm, it reports that they do NOT.
-        // For the moment, we're going to check all of this node's parents to see if the user has those. It stops
-        // when if finds a true or there are no more parents. --FF
-        if (!hasPermission) {
-            hasPermission = this.hasAnyParentPermission(sender, node);
-        }
-
-        return hasPermission;
+        return checkActualPermission(sender, node);
     }
 
     // TODO: Better player checks, most likely not needed, but safer.
     private boolean checkActualPermission(CommandSender sender, String node) {
         Player player = (Player) sender;
-        this.plugin.log(Level.FINEST, "Checking to see if player [" + player.getName() + "] has permission [" + node + "]");
+
         boolean hasPermission = sender.hasPermission(node);
+        if (!sender.isPermissionSet(node)) {
+            this.plugin.log(Level.FINER, String.format("The node [%s%s%s] was %sNOT%s set for [%s%s%s].",
+                    ChatColor.RED, node, ChatColor.WHITE, ChatColor.RED, ChatColor.WHITE, ChatColor.AQUA,
+                    player.getDisplayName(), ChatColor.WHITE));
+        }
         if (hasPermission) {
-            this.plugin.log(Level.FINER, "Player [" + player.getName() + "] HAS PERMISSION [" + node + "]!");
+            this.plugin.log(Level.FINER, "Checking to see if player [" + player.getName() + "] has permission [" + node + "]... YES");
+        } else {
+            this.plugin.log(Level.FINER, "Checking to see if player [" + player.getName() + "] has permission [" + node + "]... NO");
         }
         return hasPermission;
     }
@@ -196,6 +278,7 @@ public class MVPermissions implements PermissionsInterface {
      * @param node   The permission node to check (possibly already a parent).
      * @return True if they have any parent perm, false if none.
      */
+    // TODO remove this...?
     private boolean hasAnyParentPermission(CommandSender sender, String node) {
         String parentPerm = this.pullOneLevelOff(node);
         // Base case
@@ -216,7 +299,7 @@ public class MVPermissions implements PermissionsInterface {
      * @param node The root node to check.
      * @return The parent of the node
      */
-    private String pullOneLevelOff(String node) {
+    private static String pullOneLevelOff(String node) {
         if (node == null) {
             return null;
         }
@@ -321,7 +404,7 @@ public class MVPermissions implements PermissionsInterface {
     /**
      * If the given permission was 'multiverse.core.tp.self', this would return 'multiverse.core.tp.*'.
      */
-    private String getParentPerm(String[] seperated) {
+    private static String getParentPerm(String[] seperated) {
         if (seperated.length == 1) {
             return null;
         }
@@ -331,5 +414,4 @@ public class MVPermissions implements PermissionsInterface {
         }
         return returnString + "*";
     }
-
 }

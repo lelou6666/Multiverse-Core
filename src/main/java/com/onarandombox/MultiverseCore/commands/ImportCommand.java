@@ -13,7 +13,6 @@ import com.onarandombox.MultiverseCore.api.MultiverseWorld;
 import com.pneumaticraft.commandhandler.CommandHandler;
 import org.bukkit.ChatColor;
 import org.bukkit.World.Environment;
-import org.bukkit.WorldType;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.permissions.PermissionDefault;
@@ -33,14 +32,14 @@ public class ImportCommand extends MultiverseCommand {
     public ImportCommand(MultiverseCore plugin) {
         super(plugin);
         this.setName("Import World");
-        this.setCommandUsage("/mv import" + ChatColor.GREEN + " {NAME} {ENV} " + ChatColor.GOLD + " -g [GENERATOR[:ID]] [-n] -t [TYPE]");
-        this.setArgRange(2, 5); // SUPPRESS CHECKSTYLE: MagicNumberCheck
+        this.setCommandUsage("/mv import" + ChatColor.GREEN + " {NAME} {ENV}" + ChatColor.GOLD + " -g [GENERATOR[:ID]] [-n]");
+        this.setArgRange(1, 5); // SUPPRESS CHECKSTYLE: MagicNumberCheck
         this.addKey("mvimport");
         this.addKey("mvim");
         this.addKey("mv import");
         this.addCommandExample("/mv import " + ChatColor.GOLD + "gargamel" + ChatColor.GREEN + " normal");
-        this.addCommandExample("/mv import " + ChatColor.GOLD + "flatroom" + ChatColor.GREEN + " normal" + ChatColor.AQUA + " -t flat");
         this.addCommandExample("/mv import " + ChatColor.GOLD + "hell_world" + ChatColor.GREEN + " nether");
+        this.addCommandExample("To import a world that uses a generator, you'll need the generator:");
         this.addCommandExample("/mv import " + ChatColor.GOLD + "CleanRoom" + ChatColor.GREEN + " normal" + ChatColor.DARK_AQUA + " CleanRoomGenerator");
         this.setPermission("multiverse.core.import", "Imports a new world of the specified type.", PermissionDefault.OP);
         this.worldManager = this.plugin.getMVWorldManager();
@@ -53,7 +52,7 @@ public class ImportCommand extends MultiverseCommand {
      * @param worldFolder The File that may be a world.
      * @return True if it looks like a world, false if not.
      */
-    private boolean checkIfIsWorld(File worldFolder) {
+    private static boolean checkIfIsWorld(File worldFolder) {
         if (worldFolder.isDirectory()) {
             File[] files = worldFolder.listFiles(new FilenameFilter() {
                 @Override
@@ -128,7 +127,6 @@ public class ImportCommand extends MultiverseCommand {
         File worldFile = new File(this.plugin.getServer().getWorldContainer(), worldName);
 
         String generator = CommandHandler.getFlag("-g", args);
-        String typeString = CommandHandler.getFlag("-t", args);
         boolean useSpawnAdjust = true;
         for (String s : args) {
             if (s.equalsIgnoreCase("-n")) {
@@ -144,20 +142,9 @@ public class ImportCommand extends MultiverseCommand {
             return;
         }
 
-        // If they didn't specify a type, default to NORMAL
-        if (typeString == null) {
-            typeString = "NORMAL";
-        }
-        WorldType type = EnvironmentCommand.getWorldTypeFromString(typeString);
-        if (type == null) {
-            sender.sendMessage(ChatColor.RED + "That is not a valid World Type.");
-            EnvironmentCommand.showWorldTypes(sender);
-            return;
-        }
-
         if (worldFile.exists() && env != null) {
             Command.broadcastCommandMessage(sender, String.format("Starting import of world '%s'...", worldName));
-            if (this.worldManager.addWorld(worldName, environment, null, type, generator, useSpawnAdjust))
+            if (this.worldManager.addWorld(worldName, environment, null, null, null, generator, useSpawnAdjust))
                 Command.broadcastCommandMessage(sender, ChatColor.GREEN + "Complete!");
             else
                 Command.broadcastCommandMessage(sender, ChatColor.RED + "Failed!");

@@ -8,6 +8,7 @@
 package com.onarandombox.MultiverseCore.event;
 
 import org.bukkit.event.Event;
+import org.bukkit.event.HandlerList;
 
 import java.util.List;
 
@@ -15,12 +16,28 @@ import java.util.List;
  * Called when the Multiverse-config should be reloaded.
  */
 public class MVConfigReloadEvent extends Event {
-    private static final long serialVersionUID = 3647950355746345397L;
     private List<String> configsLoaded;
 
     public MVConfigReloadEvent(List<String> configsLoaded) {
-        super("MVConfigReload");
         this.configsLoaded = configsLoaded;
+    }
+
+    private static final HandlerList HANDLERS = new HandlerList();
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public HandlerList getHandlers() {
+        return HANDLERS;
+    }
+
+    /**
+     * Gets the handler list. This is required by the event system.
+     * @return A list of HANDLERS.
+     */
+    public static HandlerList getHandlerList() {
+        return HANDLERS;
     }
 
     /**

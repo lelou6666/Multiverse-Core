@@ -8,6 +8,7 @@
 package com.onarandombox.MultiverseCore.api;
 
 import com.onarandombox.MultiverseCore.utils.PurgeWorlds;
+import com.onarandombox.MultiverseCore.utils.SimpleWorldPurger;
 import org.bukkit.World;
 import org.bukkit.World.Environment;
 import org.bukkit.WorldType;
@@ -28,37 +29,65 @@ public interface MVWorldManager {
     /**
      * Add a new World to the Multiverse Setup.
      *
-     * @param name       World Name
-     * @param env        Environment Type
-     * @param seedString The seed in the form of a string.
-     *                   If the seed is a Long,
-     *                   it will be interpreted as such.
-     * @param type       The Type of the world to be made.
-     * @param generator  The Custom generator plugin to use.
+     * @param name               World Name
+     * @param env                Environment Type
+     * @param seedString         The seed in the form of a string.
+     *                             If the seed is a Long,
+     *                             it will be interpreted as such.
+     * @param type               The Type of the world to be made.
+     * @param generateStructures If true, this world will get NPC villages.
+     * @param generator          The Custom generator plugin to use.
      * @return True if the world is added, false if not.
      */
-    boolean addWorld(String name, Environment env, String seedString, WorldType type, String generator);
+    boolean addWorld(String name, Environment env, String seedString, WorldType type, Boolean generateStructures,
+                     String generator);
 
     /**
      * Add a new World to the Multiverse Setup.
      *
-     * @param name           World Name
-     * @param env            Environment Type
-     * @param seedString     The seed in the form of a string.
-     *                       If the seed is a Long,
-     *                       it will be interpreted as such.
-     * @param type       The Type of the world to be made.
-     * @param generator      The Custom generator plugin to use.
+     * @param name               World Name
+     * @param env                Environment Type
+     * @param seedString         The seed in the form of a string.
+     *                             If the seed is a Long,
+     *                             it will be interpreted as such.
+     * @param type               The Type of the world to be made.
+     * @param generateStructures If true, this world will get NPC villages.
+     * @param generator          The Custom generator plugin to use.
      * @param useSpawnAdjust If true, multiverse will search for a safe spawn. If not, It will not modify the level.dat.
      * @return True if the world is added, false if not.
      */
-    boolean addWorld(String name, Environment env, String seedString, WorldType type, String generator, boolean useSpawnAdjust);
+    boolean addWorld(String name, Environment env, String seedString, WorldType type, Boolean generateStructures,
+                     String generator, boolean useSpawnAdjust);
 
     /**
-     * Remove the world from the Multiverse list, from the
-     * config and deletes the folder.
+     * Make a copy of a world.
      *
-     * @param name The name of the world to remove
+     * @param oldName            Name of world to be copied
+     * @param newName            Name of world to be created
+     * @param generator          The Custom generator plugin to use. Ignored.
+     * @return True if the world is copied successfully, false if not.
+     * @deprecated Use {@link #cloneWorld(String, String)} instead.
+     */
+    @Deprecated
+    boolean cloneWorld(String oldName, String newName, String generator);
+
+    /**
+     * Make a copy of a world.
+     *
+     * @param oldName
+     *            Name of world to be copied
+     * @param newName
+     *            Name of world to be created
+     * @return True if the world is copied successfully, false if not.
+     */
+    boolean cloneWorld(String oldName, String newName);
+
+    /**
+     * Remove the world from the Multiverse list, from the config and deletes
+     * the folder.
+     *
+     * @param name
+     *            The name of the world to remove
      * @return True if success, false if failure.
      */
     boolean deleteWorld(String name);
@@ -75,12 +104,32 @@ public interface MVWorldManager {
     boolean deleteWorld(String name, boolean removeConfig);
 
     /**
+     *
+     * @param name The name of the world to remove
+     * @param removeFromConfig If true(default), we'll remove the entries from the
+     *                         config. If false, they'll stay and the world may come back.
+     * @param deleteWorldFolder If true the world folder will be completely deleted. If false
+     *                          only the contents of the world folder will be deleted
+     * @return True if success, false if failure.
+     */
+    boolean deleteWorld(String name, boolean removeFromConfig, boolean deleteWorldFolder);
+
+    /**
      * Unload a world from Multiverse.
      *
      * @param name Name of the world to unload
      * @return True if the world was unloaded, false if not.
      */
     boolean unloadWorld(String name);
+
+    /**
+     * Unload a world from Multiverse with option to prevent calling unloadWorld in Bukkit.
+     *
+     * @param name Name of the world to unload
+     * @param unloadBukkit True if Bukkit world should be unloaded
+     * @return True if the world was unloaded, false if not.
+     */
+    boolean unloadWorld(String name, boolean unloadBukkit);
 
     /**
      * Loads the world. Only use this if the world has been
@@ -168,8 +217,20 @@ public interface MVWorldManager {
      * Return the World Purger.
      *
      * @return A valid {@link PurgeWorlds}.
+     * @deprecated {@link PurgeWorlds} is deprecated!
      */
+    @Deprecated
     PurgeWorlds getWorldPurger();
+
+    /**
+     * Gets the {@link WorldPurger}.
+     * <p>
+     * TODO: Remove {@link #getWorldPurger()} and replace it with this method.
+     * @return The {@link WorldPurger} this {@link MVWorldManager} is using.
+     * @see WorldPurger
+     * @see SimpleWorldPurger
+     */
+    WorldPurger getTheWorldPurger();
 
     /**
      * Gets the world players will spawn in on first join.
@@ -227,4 +288,30 @@ public interface MVWorldManager {
      * @return The {@link MultiverseWorld} new players should spawn in.
      */
     MultiverseWorld getFirstSpawnWorld();
+
+    /**
+     * Regenerates a world.
+     *
+     * @param name Name of the world to regenerate
+     * @param useNewSeed If a new seed should be used
+     * @param randomSeed IF the new seed should be random
+     * @param seed The seed of the world.
+     *
+     * @return True if success, false if fail.
+     */
+    boolean regenWorld(String name, boolean useNewSeed, boolean randomSeed, String seed);
+
+    boolean isKeepingSpawnInMemory(World world);
+    
+    /**
+     * Checks whether Multiverse knows about a provided unloaded world. This
+     * method will check the parameter against the alias mappings.
+     *
+     * @param name The name of the unloaded world
+     * @param includeLoaded The value to return if the world is loaded
+     *
+     * @return True if the world exists and is unloaded. False if the world
+     * does not exist. {@code includeLoaded} if the world exists and is loaded.
+     */
+    boolean hasUnloadedWorld(String name, boolean includeLoaded);
 }

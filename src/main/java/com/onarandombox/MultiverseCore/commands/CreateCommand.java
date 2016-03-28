@@ -18,6 +18,8 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.permissions.PermissionDefault;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -29,8 +31,9 @@ public class CreateCommand extends MultiverseCommand {
     public CreateCommand(MultiverseCore plugin) {
         super(plugin);
         this.setName("Create World");
-        this.setCommandUsage("/mv create" + ChatColor.GREEN + " {NAME} {ENV}" + ChatColor.GOLD + " -s [SEED] -g [GENERATOR[:ID]] -t [WORLDTYPE] [-n]");
-        this.setArgRange(2, 9); // SUPPRESS CHECKSTYLE: MagicNumberCheck
+        this.setCommandUsage(String.format("/mv create %s{NAME} {ENV} %s-s [SEED] -g [GENERATOR[:ID]] -t [WORLDTYPE] [-n] -a [true|false]",
+                ChatColor.GREEN, ChatColor.GOLD));
+        this.setArgRange(2, 11); // SUPPRESS CHECKSTYLE: MagicNumberCheck
         this.addKey("mvcreate");
         this.addKey("mvc");
         this.addKey("mv create");
@@ -51,6 +54,11 @@ public class CreateCommand extends MultiverseCommand {
         String env = args.get(1);
         String seed = CommandHandler.getFlag("-s", args);
         String generator = CommandHandler.getFlag("-g", args);
+        boolean allowStructures = true;
+        String structureString = CommandHandler.getFlag("-a", args);
+        if (structureString != null) {
+            allowStructures = Boolean.parseBoolean(structureString);
+        }
         String typeString = CommandHandler.getFlag("-t", args);
         boolean useSpawnAdjust = true;
         for (String s : args) {
@@ -58,7 +66,14 @@ public class CreateCommand extends MultiverseCommand {
                 useSpawnAdjust = false;
             }
         }
-        if (worldFile.exists() || this.worldManager.isMVWorld(worldName)) {
+
+        if (this.worldManager.isMVWorld(worldName)) {
+            sender.sendMessage(ChatColor.RED + "Multiverse cannot create " + ChatColor.GOLD + ChatColor.UNDERLINE
+                    + "another" + ChatColor.RESET + ChatColor.RED + " world named " + worldName);
+            return;
+        }
+
+        if (worldFile.exists()) {
             sender.sendMessage(ChatColor.RED + "A Folder/World already exists with this name!");
             sender.sendMessage(ChatColor.RED + "If you are confident it is a world you can import with /mvimport");
             return;
@@ -81,10 +96,22 @@ public class CreateCommand extends MultiverseCommand {
             EnvironmentCommand.showWorldTypes(sender);
             return;
         }
-
+        // Determine if the generator is valid. #918
+        if (generator != null) {
+            List<String> genarray = new ArrayList<String>(Arrays.asList(generator.split(":")));
+            if (genarray.size() < 2) {
+                // If there was only one arg specified, pad with another empty one.
+                genarray.add("");
+            }
+            if (this.worldManager.getChunkGenerator(genarray.get(0), genarray.get(1), "test") == null) {
+                // We have an invalid generator.
+                sender.sendMessage("Invalid generator! '" + generator + "'. " + ChatColor.RED + "Aborting world creation.");
+                return;
+            }
+        }
         Command.broadcastCommandMessage(sender, "Starting creation of world '" + worldName + "'...");
 
-        if (this.worldManager.addWorld(worldName, environment, seed, type, generator, useSpawnAdjust)) {
+        if (this.worldManager.addWorld(worldName, environment, seed, type, allowStructures, generator, useSpawnAdjust)) {
             Command.broadcastCommandMessage(sender, "Complete!");
         } else {
             Command.broadcastCommandMessage(sender, "FAILED.");

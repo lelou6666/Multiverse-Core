@@ -9,6 +9,7 @@ package com.onarandombox.MultiverseCore.utils;
 
 import com.onarandombox.MultiverseCore.MultiverseCore;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
+
 import org.bukkit.World;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Animals;
@@ -25,7 +26,10 @@ import java.util.logging.Level;
 
 /**
  * Utility class that removes animals from worlds that don't belong there.
+ *
+ * @deprecated Use instead: {@link WorldPurger} and {@link SimpleWorldPurger}.
  */
+@Deprecated
 public class PurgeWorlds {
 
     private MultiverseCore plugin;
@@ -52,7 +56,7 @@ public class PurgeWorlds {
     /**
      * Convenience method for {@link #purgeWorld(CommandSender, MultiverseWorld, List, boolean, boolean)} that takes the settings from the world-config.
      *
-     * @param sender The {@link CommandSender} that initiated the action (TODO: Do we really need this?)
+     * @param sender The {@link CommandSender} that initiated the action
      * @param world The {@link MultiverseWorld}.
      */
     public void purgeWorld(CommandSender sender, MultiverseWorld world) {
@@ -66,7 +70,7 @@ public class PurgeWorlds {
 
     /**
      * Clear all animals/monsters that do not belong to a world according to the config.
-     * @param sender The {@link CommandSender} that initiated the action. (TODO: Do we really need this?)
+     * @param sender The {@link CommandSender} that initiated the action.
      * @param mvworld The {@link MultiverseWorld}.
      * @param thingsToKill A {@link List} of animals/monsters to be killed.
      * @param negateAnimals Whether the monsters in the list should be negated.
@@ -123,14 +127,13 @@ public class PurgeWorlds {
      */
     private boolean killMonster(MultiverseWorld mvworld, Entity e, List<String> creaturesToKill, boolean negate) {
         String entityName = "";
-        //TODO: Fixme once either Rigby puts his awesome thing in OR Enderdragon gets a toString, OR both.
         if (e instanceof EnderDragon) {
             entityName = "ENDERDRAGON";
         } else {
             entityName = e.toString().replaceAll("Craft", "").toUpperCase();
         }
         if (e instanceof Slime || e instanceof Monster || e instanceof Ghast || e instanceof EnderDragon) {
-            this.plugin.log(Level.FINER, "Looking at a monster: " + e);
+            this.plugin.log(Level.FINEST, "Looking at a monster: " + e);
             if (creaturesToKill.contains(entityName) || creaturesToKill.contains("ALL") || creaturesToKill.contains("MONSTERS")) {
                 if (!negate) {
                     this.plugin.log(Level.FINEST, "Removing a monster: " + e);

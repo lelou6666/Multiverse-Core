@@ -7,14 +7,14 @@
 
 package com.onarandombox.MultiverseCore.utils;
 
-import java.util.logging.Level;
-import com.fernferret.allpay.GenericBank;
 import com.onarandombox.MultiverseCore.MultiverseCore;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.permissions.Permission;
+
+import java.util.logging.Level;
 
 /**
  * Utility-class for permissions.
@@ -78,7 +78,7 @@ public class PermissionTools {
      * @param separatedPermissionString The array of a dot separated perm string.
      * @return The dot separated parent permission string.
      */
-    private String getParentPerm(String[] separatedPermissionString) {
+    private static String getParentPerm(String[] separatedPermissionString) {
         if (separatedPermissionString.length == 1) {
             return null;
         }
@@ -100,7 +100,7 @@ public class PermissionTools {
      */
     public boolean playerHasMoneyToEnter(MultiverseWorld fromWorld, MultiverseWorld toWorld, CommandSender teleporter, Player teleportee, boolean pay) {
         Player teleporterPlayer;
-        if (MultiverseCore.TeleportIntercept) {
+        if (plugin.getMVConfig().getTeleportIntercept()) {
             if (teleporter instanceof ConsoleCommandSender) {
                 return true;
             }
@@ -134,24 +134,50 @@ public class PermissionTools {
 
         // Only check payments if it's a different world:
         if (!toWorld.equals(fromWorld)) {
+            final double price = toWorld.getPrice();
+            // Don't bother checking economy stuff if it doesn't even cost to enter.
+            if (price == 0D) {
+                return true;
+            }
             // If the player does not have to pay, return now.
             if (this.plugin.getMVPerms().hasPermission(teleporter, toWorld.getExemptPermission().getName(), true)) {
                 return true;
             }
-            GenericBank bank = plugin.getBank();
-            String errString = "You need " + bank.getFormattedAmount(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency())
-                    + " to send " + teleportee + " to " + toWorld.getColoredWorldString();
-            if (teleportee.equals(teleporter)) {
-                errString = "You need " + bank.getFormattedAmount(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency())
-                        + " to enter " + toWorld.getColoredWorldString();
-            }
-            if (!bank.hasEnough(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency(), errString)) {
+
+            final MVEconomist economist = plugin.getEconomist();
+            final int currency = toWorld.getCurrency();
+            final String formattedAmount = economist.formatPrice(price, currency);
+
+            if (economist.isPlayerWealthyEnough(teleporterPlayer, price, currency)) {
+                if (pay) {
+                    if (price < 0D) {
+                        economist.deposit(teleporterPlayer, -price, currency);
+                    } else {
+                        economist.withdraw(teleporterPlayer, price, currency);
+                    }
+                    sendTeleportPaymentMessage(economist, teleporterPlayer, teleportee, toWorld.getColoredWorldString(), price, currency);
+                }
+            } else {
+                if (teleportee.equals(teleporter)) {
+                    teleporterPlayer.sendMessage(economist.getNSFMessage(currency,
+                            "You need " + formattedAmount + " to enter " + toWorld.getColoredWorldString()));
+                } else {
+                    teleporterPlayer.sendMessage(economist.getNSFMessage(currency,
+                            "You need " + formattedAmount + " to send " + teleportee.getName() + " to " + toWorld.getColoredWorldString()));
+                }
                 return false;
-            } else if (pay) {
-                bank.give(teleporterPlayer, toWorld.getPrice(), toWorld.getCurrency());
             }
         }
         return true;
+    }
+
+    private void sendTeleportPaymentMessage (MVEconomist economist, Player teleporterPlayer, Player teleportee, String toWorld, double price, int currency) {
+        price = Math.abs(price);
+        if (teleporterPlayer.equals(teleportee)) {
+            teleporterPlayer.sendMessage("You were " + (price > 0D ? "charged " : "given ") + economist.formatPrice(price, currency) + " for teleporting to " + toWorld);
+        } else {
+            teleporterPlayer.sendMessage("You were " + (price > 0D ? "charged " : "given ") + economist.formatPrice(price, currency) + " for teleporting " + teleportee.getName() + " to " + toWorld);
+        }
     }
 
 
@@ -171,7 +197,7 @@ public class PermissionTools {
         this.plugin.log(Level.FINEST, "Checking '" + teleporter + "' can send '" + teleportee + "' somewhere");
 
         Player teleporterPlayer;
-        if (MultiverseCore.TeleportIntercept) {
+        if (plugin.getMVConfig().getTeleportIntercept()) {
             // The console can send anyone anywhere
             if (teleporter instanceof ConsoleCommandSender) {
                 return true;
@@ -228,6 +254,32 @@ public class PermissionTools {
             }
         }
         return true;
+    }
+
+    /**
+     * Checks to see if a player can bypass the player limit.
+     *
+     * @param toWorld The world travelling to.
+     * @param teleporter The player that initiated the teleport.
+     * @param teleportee The player travelling.
+     * @return True if they can bypass the player limit.
+     */
+    public boolean playerCanBypassPlayerLimit(MultiverseWorld toWorld, CommandSender teleporter, Player teleportee) {
+        if (teleporter == null) {
+            teleporter = teleportee;
+        }
+
+        if (!(teleporter instanceof Player)) {
+            return true;
+        }
+
+        MVPermissions perms = plugin.getMVPerms();
+        if (perms.hasPermission(teleportee, "mv.bypass.playerlimit." + toWorld.getName(), false)) {
+            return true;
+        } else {
+            teleporter.sendMessage("The world " + toWorld.getColoredWorldString() + " is full");
+            return false;
+        }
     }
 
     /**

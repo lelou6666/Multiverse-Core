@@ -8,9 +8,11 @@
 package com.onarandombox.MultiverseCore.utils;
 
 import com.onarandombox.MultiverseCore.MultiverseCore;
+import com.onarandombox.MultiverseCore.api.BlockSafety;
 import com.onarandombox.MultiverseCore.api.MVDestination;
 import com.onarandombox.MultiverseCore.destination.InvalidDestination;
 import com.onarandombox.MultiverseCore.enums.TeleportResult;
+
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -26,7 +28,10 @@ import java.util.logging.Level;
 
 /**
  * The {@link SafeTTeleporter}.
+ *
+ * @deprecated Use instead: {@link com.onarandombox.MultiverseCore.api.SafeTTeleporter} and {@link SimpleSafeTTeleporter}.
  */
+@Deprecated
 public class SafeTTeleporter {
 
     private MultiverseCore plugin;
@@ -34,7 +39,7 @@ public class SafeTTeleporter {
 
     public SafeTTeleporter(MultiverseCore plugin) {
         this.plugin = plugin;
-        this.bs = new BlockSafety();
+        this.bs = plugin.getBlockSafety();
     }
 
     private static final int DEFAULT_TOLERANCE = 6;
@@ -58,12 +63,11 @@ public class SafeTTeleporter {
      */
     public Location getSafeLocation(Location l, int tolerance, int radius) {
         // Check around the player first in a configurable radius:
-        // TODO: Make this configurable
         Location safe = checkAboveAndBelowLocation(l, tolerance, radius);
         if (safe != null) {
             safe.setX(safe.getBlockX() + .5); // SUPPRESS CHECKSTYLE: MagicNumberCheck
             safe.setZ(safe.getBlockZ() + .5); // SUPPRESS CHECKSTYLE: MagicNumberCheck
-            this.plugin.log(Level.FINE, "Hey! I found one: " + LocationManipulation.strCoordsRaw(safe));
+            this.plugin.log(Level.FINE, "Hey! I found one: " + plugin.getLocationManipulation().strCoordsRaw(safe));
         } else {
             this.plugin.log(Level.FINE, "Uh oh! No safe place found!");
         }
@@ -77,7 +81,7 @@ public class SafeTTeleporter {
         }
         // We want half of it, so we can go up and down
         tolerance /= 2;
-        this.plugin.log(Level.FINER, "Given Location of: " + LocationManipulation.strCoordsRaw(l));
+        this.plugin.log(Level.FINER, "Given Location of: " + plugin.getLocationManipulation().strCoordsRaw(l));
         this.plugin.log(Level.FINER, "Checking +-" + tolerance + " with a radius of " + radius);
 
         // For now this will just do a straight up block.

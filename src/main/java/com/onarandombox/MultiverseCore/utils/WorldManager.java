@@ -7,16 +7,22 @@
 
 package com.onarandombox.MultiverseCore.utils;
 
+import com.dumptruckman.minecraft.util.Logging;
 import com.onarandombox.MultiverseCore.MVWorld;
 import com.onarandombox.MultiverseCore.MultiverseCore;
+import com.onarandombox.MultiverseCore.WorldProperties;
 import com.onarandombox.MultiverseCore.api.MVWorldManager;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
-import com.onarandombox.MultiverseCore.commands.EnvironmentCommand;
+import com.onarandombox.MultiverseCore.api.SafeTTeleporter;
+import com.onarandombox.MultiverseCore.api.WorldPurger;
 import com.onarandombox.MultiverseCore.event.MVWorldDeleteEvent;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.World.Environment;
 import org.bukkit.WorldCreator;
 import org.bukkit.WorldType;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -33,26 +39,30 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
+import java.util.Stack;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 
 /**
  * Public facing API to add/remove Multiverse worlds.
  */
 public class WorldManager implements MVWorldManager {
-    private MultiverseCore plugin;
-    private PurgeWorlds worldPurger;
-    private Map<String, MultiverseWorld> worlds;
-    private List<String> unloadedWorlds;
+    private final MultiverseCore plugin;
+    private final WorldPurger worldPurger;
+    private final Map<String, MultiverseWorld> worlds;
+    private Map<String, WorldProperties> worldsFromTheConfig;
     private FileConfiguration configWorlds = null;
     private Map<String, String> defaultGens;
     private String firstSpawn;
 
     public WorldManager(MultiverseCore core) {
         this.plugin = core;
-        this.worlds = new HashMap<String, MultiverseWorld>();
-        this.unloadedWorlds = new ArrayList<String>();
-        this.worldPurger = new PurgeWorlds(this.plugin);
+        this.worldsFromTheConfig = new HashMap<String, WorldProperties>();
+        this.worlds = new ConcurrentHashMap<String, MultiverseWorld>();
+        this.worldPurger = new SimpleWorldPurger(plugin);
     }
 
     /**
@@ -67,7 +77,7 @@ public class WorldManager implements MVWorldManager {
                 return s.equalsIgnoreCase("bukkit.yml");
             }
         });
-        if (files.length == 1) {
+        if (files != null && files.length == 1) {
             FileConfiguration bukkitConfig = YamlConfiguration.loadConfiguration(files[0]);
             if (bukkitConfig.isConfigurationSection("worlds")) {
                 Set<String> keys = bukkitConfig.getConfigurationSection("worlds").getKeys(false);
@@ -75,23 +85,145 @@ public class WorldManager implements MVWorldManager {
                     defaultGens.put(key, bukkitConfig.getString("worlds." + key + ".generator", ""));
                 }
             }
+        } else {
+            this.plugin.log(Level.WARNING, "Could not read 'bukkit.yml'. Any Default worldgenerators will not be loaded!");
         }
     }
 
     /**
      * {@inheritDoc}
+     * @deprecated Use {@link #cloneWorld(String, String)} instead.
      */
     @Override
-    public boolean addWorld(String name, Environment env, String seedString, WorldType type, String generator) {
-        return this.addWorld(name, env, seedString, type, generator, true);
+    @Deprecated
+    public boolean cloneWorld(String oldName, String newName, String generator) {
+        return this.cloneWorld(oldName, newName);
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public boolean addWorld(String name, Environment env, String seedString, WorldType type, String generator, boolean useSpawnAdjust) {
-        plugin.log(Level.FINE, "Adding world with: " + name + ", " + env.toString() + ", " + seedString + ", " + type.toString() + ", " + generator);
+    public boolean cloneWorld(String oldName, String newName) {
+        // Make sure we already know about the old world and that we don't
+        // already know about the new world.
+        if (!this.worldsFromTheConfig.containsKey(oldName)) {
+            for (Map.Entry<String, WorldProperties> entry : this.worldsFromTheConfig.entrySet()) {
+                if (oldName.equals(entry.getValue().getAlias())) {
+                    oldName = entry.getKey();
+                    break;
+                }
+            }
+            if (!this.worldsFromTheConfig.containsKey(oldName)) {
+                Logging.warning("Old world '%s' does not exist", oldName);
+                return false;
+            }
+        }
+        if (this.isMVWorld(newName)) {
+            Logging.warning("New world '%s' already exists", newName);
+            return false;
+        }
+
+        final File oldWorldFile = new File(this.plugin.getServer().getWorldContainer(), oldName);
+        final File newWorldFile = new File(this.plugin.getServer().getWorldContainer(), newName);
+
+        // Make sure the new world doesn't exist outside of multiverse.
+        if (newWorldFile.exists()) {
+            Logging.warning("File for new world '%s' already exists", newName);
+            return false;
+        }
+
+        // Load the old world... but just the metadata.
+        boolean wasJustLoaded = false;
+        boolean wasLoadSpawn = false;
+        if (this.plugin.getServer().getWorld(oldName) == null) {
+            wasJustLoaded = true;
+            WorldProperties props = this.worldsFromTheConfig.get(oldName);
+            wasLoadSpawn = props.isKeepingSpawnInMemory();
+            if (wasLoadSpawn) {
+                // No chunks please.
+                props.setKeepSpawnInMemory(false);
+            }
+            if (!this.loadWorld(oldName)) {
+                return false;
+            }
+            this.plugin.getServer().getWorld(oldName).setAutoSave(false);
+        }
+        
+        // Grab a bit of metadata from the old world.
+        MVWorld oldWorld = (MVWorld) getMVWorld(oldName);
+        Environment environment = oldWorld.getEnvironment();
+        String seedString = oldWorld.getSeed() + "";
+        WorldType worldType = oldWorld.getWorldType();
+        Boolean generateStructures = oldWorld.getCBWorld().canGenerateStructures();
+        String generator = oldWorld.getGenerator();
+        boolean useSpawnAdjust = oldWorld.getAdjustSpawn();
+        
+        // Don't need the loaded world anymore.
+        if (wasJustLoaded) {
+            this.unloadWorld(oldName, true);
+            oldWorld = null;
+            if (wasLoadSpawn) {
+                this.worldsFromTheConfig.get(oldName).setKeepSpawnInMemory(true);
+            }
+        }
+
+        boolean wasAutoSave = false;
+        if (oldWorld != null && oldWorld.getCBWorld().isAutoSave()) {
+            wasAutoSave = true;
+            Logging.config("Saving world '%s'", oldName);
+            oldWorld.getCBWorld().setAutoSave(false);
+            oldWorld.getCBWorld().save();
+        }
+        Logging.config("Copying files for world '%s'", oldName);
+        if (!FileUtils.copyFolder(oldWorldFile, newWorldFile, Logging.getLogger())) {
+            Logging.warning("Failed to copy files for world '%s', see the log info", newName);
+            return false;
+        }
+        if (oldWorld != null && wasAutoSave) {
+            oldWorld.getCBWorld().setAutoSave(true);
+        }
+
+        File uidFile = new File(newWorldFile, "uid.dat");
+        if (uidFile.exists() && !uidFile.delete()) {
+            Logging.warning("Failed to delete unique ID file for world '%s'", newName);
+            return false;
+        }
+
+        if (newWorldFile.exists()) {
+            Logging.fine("Succeeded at copying files");
+            if (this.addWorld(newName, environment, seedString, worldType, generateStructures, generator, useSpawnAdjust)) {
+                // getMVWorld() doesn't actually return an MVWorld
+                Logging.fine("Succeeded at importing world");
+                MVWorld newWorld = (MVWorld) this.getMVWorld(newName);
+                newWorld.copyValues(this.worldsFromTheConfig.get(oldName));
+                // don't keep the alias the same -- that would be useless
+                newWorld.setAlias(null);
+                return true;
+            }
+        }
+        Logging.warning("Failed to copy files for world '%s', see the log info", newName);
+        return false;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean addWorld(String name, Environment env, String seedString, WorldType type, Boolean generateStructures,
+                            String generator) {
+        return this.addWorld(name, env, seedString, type, generateStructures, generator, true);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean addWorld(String name, Environment env, String seedString, WorldType type, Boolean generateStructures,
+                            String generator, boolean useSpawnAdjust) {
+        if (name.equalsIgnoreCase("plugins") || name.equalsIgnoreCase("logs")) {
+            return false;
+        }
         Long seed = null;
         WorldCreator c = new WorldCreator(name);
         if (seedString != null && seedString.length() > 0) {
@@ -108,9 +240,19 @@ public class WorldManager implements MVWorldManager {
             c.generator(generator);
         }
         c.environment(env);
-        c.type(type);
+        if (type != null) {
+            c.type(type);
+        }
+        if (generateStructures != null) {
+            c.generateStructures(generateStructures);
+        }
 
-        World world;
+        // Important: doLoad() needs the MVWorld-object in worldsFromTheConfig
+        if (!worldsFromTheConfig.containsKey(name)) {
+            WorldProperties props = new WorldProperties(useSpawnAdjust, env);
+            worldsFromTheConfig.put(name, props);
+        }
+
         StringBuilder builder = new StringBuilder();
         builder.append("Loading World & Settings - '").append(name).append("'");
         builder.append(" - Env: ").append(env);
@@ -121,58 +263,39 @@ public class WorldManager implements MVWorldManager {
         if (generator != null) {
             builder.append(" & generator: ").append(generator);
         }
-        this.plugin.log(Level.INFO, builder.toString());
+        Logging.info(builder.toString());
 
-        try {
-            world = c.createWorld();
-        } catch (Exception e) {
-            this.plugin.log(Level.SEVERE, "The world '" + name + "' could NOT be loaded because it contains errors!");
-            this.plugin.log(Level.SEVERE, "Try using Chukster to repair your world! '" + name + "'");
-            this.plugin.log(Level.SEVERE, "http://forums.bukkit.org/threads/admin-chunkster.8186/");
-            return false;
-        }
-
-        if (world == null) {
+        if (!doLoad(c, true)) {
             this.plugin.log(Level.SEVERE, "Failed to Create/Load the world '" + name + "'");
             return false;
         }
 
-        MultiverseWorld mvworld = new MVWorld(world, this.configWorlds, this.plugin,
-                this.plugin.getServer().getWorld(name).getSeed(), generator, useSpawnAdjust);
-        this.worldPurger.purgeWorld(null, mvworld);
-        this.worlds.put(name, mvworld);
-        if (this.unloadedWorlds.contains(name)) {
-            this.unloadedWorlds.remove(name);
-        }
-        return true;
-    }
+        // set generator (special case because we can't read it from org.bukkit.World)
+        this.worlds.get(name).setGenerator(generator);
 
-    /**
-     * Verifies that a given Plugin generator string exists.
-     *
-     * @param generator The name of the generator plugin. This should be something like CleanRoomGenerator.
-     * @return True if the plugin exists and is enabled, false if not.
-     */
-    // TODO maybe remove this since it's unused?
-    private boolean pluginExists(String generator) {
-        Plugin myPlugin = this.plugin.getServer().getPluginManager().getPlugin(generator);
-        return myPlugin != null && myPlugin.isEnabled();
+        this.saveWorldsConfig();
+        return true;
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public ChunkGenerator getChunkGenerator(String generator, String generatorID, String worldName) {
+    public ChunkGenerator getChunkGenerator(String generator, final String generatorID, final String worldName) {
         if (generator == null) {
             return null;
         }
 
-        Plugin myPlugin = this.plugin.getServer().getPluginManager().getPlugin(generator);
+        final Plugin myPlugin = this.plugin.getServer().getPluginManager().getPlugin(generator);
         if (myPlugin == null) {
             return null;
         } else {
-            return myPlugin.getDefaultWorldGenerator(worldName, generatorID);
+            return plugin.getUnsafeCallWrapper().wrap(new Callable<ChunkGenerator>() {
+                @Override
+                public ChunkGenerator call() throws Exception {
+                    return myPlugin.getDefaultWorldGenerator(worldName, generatorID);
+                }
+            }, myPlugin.getName(), "Failed to get the default chunk generator: %s");
         }
     }
 
@@ -184,18 +307,14 @@ public class WorldManager implements MVWorldManager {
         if (!unloadWorld(name)) {
             return false;
         }
-        if (this.configWorlds.get("worlds." + name) != null) {
-            this.plugin.log(Level.INFO, "World '" + name + "' was removed from config.yml");
-            this.configWorlds.set("worlds." + name, null);
+        if (this.worldsFromTheConfig.containsKey(name)) {
+            this.worldsFromTheConfig.remove(name);
+            Logging.info("World '%s' was removed from config.yml", name);
 
             this.saveWorldsConfig();
-            // Remove it from the list of unloaded worlds.
-            if (this.unloadedWorlds.contains(name)) {
-                this.unloadedWorlds.remove(name);
-            }
             return true;
         } else {
-            this.plugin.log(Level.INFO, "World '" + name + "' was already removed from config.yml");
+            Logging.info("World '%s' was already removed from config.yml", name);
         }
         return false;
     }
@@ -205,7 +324,7 @@ public class WorldManager implements MVWorldManager {
      */
     @Override
     public void setFirstSpawnWorld(String world) {
-        if (world == null) {
+        if ((world == null) && (this.plugin.getServer().getWorlds().size() > 0)) {
             this.firstSpawn = this.plugin.getServer().getWorlds().get(0).getName();
         } else {
             this.firstSpawn = world;
@@ -236,21 +355,35 @@ public class WorldManager implements MVWorldManager {
      */
     @Override
     public boolean unloadWorld(String name) {
+        return this.unloadWorld(name, true);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean unloadWorld(String name, boolean unloadBukkit) {
         if (this.worlds.containsKey(name)) {
-            if (this.unloadWorldFromBukkit(name, true)) {
+            this.worldsFromTheConfig.get(name).cacheVirtualProperties();
+            if (unloadBukkit && this.unloadWorldFromBukkit(name, true)) {
                 this.worlds.remove(name);
-                this.plugin.log(Level.INFO, "World '" + name + "' was unloaded from memory.");
-                this.unloadedWorlds.add(name);
+                Logging.info("World '%s' was unloaded from memory.", name);
+                return true;
+            } else if (!unloadBukkit){
+                this.worlds.remove(name);
+                Logging.info("World '%s' was unloaded from memory.", name);
                 return true;
             } else {
-                this.plugin.log(Level.WARNING, "World '" + name + "' could not be unloaded. Is it a default world?");
+                Logging.warning("World '%s' could not be unloaded. Is it a default world?", name);
             }
         } else if (this.plugin.getServer().getWorld(name) != null) {
-            this.plugin.log(Level.WARNING, "Hmm Multiverse does not know about this world but it's loaded in memory.");
-            this.plugin.log(Level.WARNING, "To unload it using multiverse, use:");
-            this.plugin.log(Level.WARNING, "/mv import " + name + " " + this.plugin.getServer().getWorld(name).getEnvironment().toString());
+            Logging.warning("Hmm Multiverse does not know about this world but it's loaded in memory.");
+            Logging.warning("To let Multiverse know about it, use:");
+            Logging.warning("/mv import %s %s", name, this.plugin.getServer().getWorld(name).getEnvironment().toString());
+        } else if (this.worldsFromTheConfig.containsKey(name)) {
+            return true; // it's already unloaded
         } else {
-            this.plugin.log(Level.INFO, "Multiverse does not know about " + name + " and it's not loaded by Bukkit.");
+            Logging.info("Multiverse does not know about '%s' and it's not loaded by Bukkit.", name);
         }
         return false;
     }
@@ -262,40 +395,95 @@ public class WorldManager implements MVWorldManager {
     public boolean loadWorld(String name) {
         // Check if the World is already loaded
         if (this.worlds.containsKey(name)) {
-            // Ensure it's not unloaded, since it IS loaded.
-            if (this.unloadedWorlds.contains(name)) {
-                this.unloadedWorlds.remove(name);
-            }
             return true;
         }
 
-        // Grab all the Worlds from the Config.
-        Set<String> worldKeys = this.configWorlds.getConfigurationSection("worlds").getKeys(false);
-
-        // Check that the list is not null and that the config contains the world
-        if ((worldKeys != null) && (worldKeys.contains(name))) {
-            // Grab the initial values from the config file.
-            String environment = this.configWorlds.getString("worlds." + name + ".environment", "NORMAL"); // Grab the Environment as a String.
-            String type = this.configWorlds.getString("worlds." + name + ".type", "NORMAL");
-            String seedString = this.configWorlds.getString("worlds." + name + ".seed", "");
-            String generatorString = this.configWorlds.getString("worlds." + name + ".generator");
-
-            addWorld(name, EnvironmentCommand.getEnvFromString(environment), seedString,
-                    EnvironmentCommand.getWorldTypeFromString(type), generatorString);
-            if (this.unloadedWorlds.contains(name)) {
-                this.unloadedWorlds.remove(name);
-            }
-            return true;
+        // Check that the world is in the config
+        if (worldsFromTheConfig.containsKey(name)) {
+            return doLoad(name);
         } else {
             return false;
         }
+    }
+
+    private void brokenWorld(String name) {
+        this.plugin.log(Level.SEVERE, "The world '" + name + "' could NOT be loaded because it contains errors and is probably corrupt!");
+        this.plugin.log(Level.SEVERE, "Try using Minecraft Region Fixer to repair your world! '" + name + "'");
+        this.plugin.log(Level.SEVERE, "https://github.com/Fenixin/Minecraft-Region-Fixer");
+    }
+
+    private void nullWorld(String name) {
+        this.plugin.log(Level.SEVERE, "The world '" + name + "' could NOT be loaded because the server didn't like it!");
+        this.plugin.log(Level.SEVERE, "We don't really know why this is. Contact the developer of your server software!");
+        this.plugin.log(Level.SEVERE, "Server version info: " + Bukkit.getServer().getVersion());
+    }
+
+    private boolean doLoad(String name) {
+        return doLoad(name, false, null);
+    }
+
+    private boolean doLoad(String name, boolean ignoreExists, WorldType type) {
+        if (!worldsFromTheConfig.containsKey(name))
+            throw new IllegalArgumentException("That world doesn't exist!");
+
+        final WorldProperties world = worldsFromTheConfig.get(name);
+        final WorldCreator creator = WorldCreator.name(name);
+
+        creator.environment(world.getEnvironment()).seed(world.getSeed());
+        if (type != null) {
+            creator.type(type);
+        }
+
+        boolean generatorSuccess = true;
+        if ((world.getGenerator() != null) && (!world.getGenerator().equals("null")))
+            generatorSuccess = null != plugin.getUnsafeCallWrapper().wrap(new Callable<Object>() {
+                @Override
+                public Object call() throws Exception {
+                    creator.generator(world.getGenerator());
+                    return new Object();
+                }
+            }, "the generator plugin", "Failed to set the generator for world '%s' to '%s': %s", name, world.getGenerator());
+
+        return generatorSuccess && doLoad(creator, ignoreExists);
+    }
+
+    private boolean doLoad(WorldCreator creator, boolean ignoreExists) {
+        String worldName = creator.name();
+        if (!worldsFromTheConfig.containsKey(worldName))
+            throw new IllegalArgumentException("That world doesn't exist!");
+        if (worlds.containsKey(worldName))
+            throw new IllegalArgumentException("That world is already loaded!");
+
+        if (!ignoreExists && !new File(this.plugin.getServer().getWorldContainer(), worldName).exists() && !new File(this.plugin.getServer().getWorldContainer().getParent(), worldName).exists()) {
+            this.plugin.log(Level.WARNING, "WorldManager: Can't load this world because the folder was deleted/moved: " + worldName);
+            this.plugin.log(Level.WARNING, "Use '/mv remove' to remove it from the config!");
+            return false;
+        }
+
+        WorldProperties mvworld = worldsFromTheConfig.get(worldName);
+        World cbworld;
+        try {
+            cbworld = creator.createWorld();
+        } catch (Exception e) {
+            e.printStackTrace();
+            brokenWorld(worldName);
+            return false;
+        }
+        if (cbworld == null) {
+            nullWorld(worldName);
+            return false;
+        }
+        MVWorld world = new MVWorld(plugin, cbworld, mvworld);
+        this.worldPurger.purgeWorld(world);
+        this.worlds.put(worldName, world);
+        return true;
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public boolean deleteWorld(String name, boolean removeFromConfig) {
+    public boolean deleteWorld(String name, boolean removeFromConfig, boolean deleteWorldFolder) {
         World world = this.plugin.getServer().getWorld(name);
         if (world == null) {
             // We can only delete loaded worlds
@@ -323,23 +511,31 @@ public class WorldManager implements MVWorldManager {
         try {
             File worldFile = world.getWorldFolder();
             plugin.log(Level.FINER, "deleteWorld(): worldFile: " + worldFile.getAbsolutePath());
-            boolean deletedWorld = FileUtils.deleteFolder(worldFile);
-            if (deletedWorld) {
-                this.plugin.log(Level.INFO, "World " + name + " was DELETED.");
+            if (deleteWorldFolder ? FileUtils.deleteFolder(worldFile) : FileUtils.deleteFolderContents(worldFile)) {
+                Logging.info("World '%s' was DELETED.", name);
+                return true;
             } else {
-                this.plugin.log(Level.SEVERE, "World " + name + " was NOT deleted.");
-                this.plugin.log(Level.SEVERE, "Are you sure the folder " + name + " exists?");
-                this.plugin.log(Level.SEVERE, "Please check your file permissions on " + name);
+                Logging.severe("World '%s' was NOT deleted.", name);
+                Logging.severe("Are you sure the folder %s exists?", name);
+                Logging.severe("Please check your file permissions on '%s'", name);
+                return false;
             }
-            return deletedWorld;
         } catch (Throwable e) {
-            this.plugin.log(Level.SEVERE, "Hrm, something didn't go as planned. Here's an exception for ya.");
-            this.plugin.log(Level.SEVERE, "You can go politely explain your situation in #multiverse on esper.net");
-            this.plugin.log(Level.SEVERE, "But from here, it looks like your folder is oddly named.");
-            this.plugin.log(Level.SEVERE, "This world has been removed from Multiverse-Core so your best bet is to go delete the folder by hand. Sorry.");
-            this.plugin.log(Level.SEVERE, e.getMessage());
+            Logging.severe("Hrm, something didn't go as planned. Here's an exception for ya.");
+            Logging.severe("You can go politely explain your situation in #multiverse on esper.net");
+            Logging.severe("But from here, it looks like your folder is oddly named.");
+            Logging.severe("This world has been removed from Multiverse-Core so your best bet is to go delete the folder by hand. Sorry.");
+            Logging.severe(e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean deleteWorld(String name, boolean removeFromConfig) {
+        return this.deleteWorld(name, removeFromConfig, true);
     }
 
     /**
@@ -371,7 +567,7 @@ public class WorldManager implements MVWorldManager {
         if (w != null) {
             World safeWorld = this.plugin.getServer().getWorlds().get(0);
             List<Player> ps = w.getPlayers();
-            SafeTTeleporter teleporter = this.plugin.getTeleporter();
+            SafeTTeleporter teleporter = this.plugin.getSafeTTeleporter();
             for (Player p : ps) {
                 // We're removing players forcefully from a world, they'd BETTER spawn safely.
                 teleporter.safelyTeleport(null, p, safeWorld.getSpawnLocation(), true);
@@ -392,8 +588,12 @@ public class WorldManager implements MVWorldManager {
      */
     @Override
     public MultiverseWorld getMVWorld(String name) {
-        if (this.worlds.containsKey(name)) {
-            return this.worlds.get(name);
+        if (name == null) {
+            return null;
+        }
+        MultiverseWorld world = this.worlds.get(name);
+        if (world != null) {
+            return world;
         }
         return this.getMVWorldByAlias(name);
     }
@@ -428,7 +628,7 @@ public class WorldManager implements MVWorldManager {
      * {@inheritDoc}
      */
     @Override
-    public boolean isMVWorld(String name) {
+    public boolean isMVWorld(final String name) {
         return (this.worlds.containsKey(name) || isMVWorldAlias(name));
     }
 
@@ -446,7 +646,7 @@ public class WorldManager implements MVWorldManager {
      * @param alias The alias of the world to check.
      * @return True if the world exists, false if not.
      */
-    private boolean isMVWorldAlias(String alias) {
+    private boolean isMVWorldAlias(final String alias) {
         for (MultiverseWorld w : this.worlds.values()) {
             if (w.getAlias().equalsIgnoreCase(alias)) {
                 return true;
@@ -462,28 +662,22 @@ public class WorldManager implements MVWorldManager {
     public void loadDefaultWorlds() {
         this.ensureConfigIsPrepared();
         List<World> myWorlds = this.plugin.getServer().getWorlds();
-        Set<String> worldStrings = this.configWorlds.getConfigurationSection("worlds").getKeys(false);
         for (World w : myWorlds) {
             String name = w.getName();
-            if (!worldStrings.contains(name)) {
+            if (!worldsFromTheConfig.containsKey(name)) {
+                String generator = null;
                 if (this.defaultGens.containsKey(name)) {
-                    this.addWorld(name, w.getEnvironment(), w.getSeed() + "", w.getWorldType(), this.defaultGens.get(name));
-                } else {
-                    this.addWorld(name, w.getEnvironment(), w.getSeed() + "", w.getWorldType(), null);
+                    generator = this.defaultGens.get(name);
                 }
-
+                this.addWorld(name, w.getEnvironment(), String.valueOf(w.getSeed()), w.getWorldType(), w.canGenerateStructures(), generator);
             }
         }
     }
 
     private void ensureConfigIsPrepared() {
+        this.configWorlds.options().pathSeparator(SEPARATOR);
         if (this.configWorlds.getConfigurationSection("worlds") == null) {
             this.configWorlds.createSection("worlds");
-            try {
-                this.configWorlds.save(new File(this.plugin.getDataFolder(), "worlds.yml"));
-            } catch (IOException e) {
-                this.plugin.log(Level.SEVERE, "Failed to save worlds.yml. Please check your file permissions.");
-            }
         }
     }
 
@@ -496,13 +690,10 @@ public class WorldManager implements MVWorldManager {
         int count = 0;
         this.ensureConfigIsPrepared();
         this.ensureSecondNamespaceIsPrepared();
-        // Grab all the Worlds from the Config.
-        Set<String> worldKeys = this.configWorlds.getConfigurationSection("worlds").getKeys(false);
 
         // Force the worlds to be loaded, ie don't just load new worlds.
         if (forceLoad) {
             // Remove all world permissions.
-
             Permission allAccess = this.plugin.getServer().getPluginManager().getPermission("multiverse.access.*");
             Permission allExempt = this.plugin.getServer().getPluginManager().getPermission("multiverse.exempt.*");
             for (MultiverseWorld w : this.worlds.values()) {
@@ -516,7 +707,7 @@ public class WorldManager implements MVWorldManager {
                 this.plugin.getServer().getPluginManager().removePermission(w.getAccessPermission().getName());
                 this.plugin.getServer().getPluginManager().removePermission(w.getExemptPermission().getName());
                 // Special namespace for gamemodes
-                this.plugin.getServer().getPluginManager().removePermission("mv.gamemode.bypass." + w.getName());
+                this.plugin.getServer().getPluginManager().removePermission("mv.bypass.gamemode." + w.getName());
             }
             // Recalc the all permission
             this.plugin.getServer().getPluginManager().recalculatePermissionDefaults(allAccess);
@@ -524,45 +715,20 @@ public class WorldManager implements MVWorldManager {
             this.worlds.clear();
         }
 
-        // Check that the list is not null.
-        if (worldKeys != null) {
-            for (String worldKey : worldKeys) {
-                // Check if the World is already loaded within the Plugin.
-                if (this.worlds.containsKey(worldKey)) {
-                    continue;
-                }
-
-                // If autoload was set to false, don't load this one.
-                if (!this.configWorlds.getBoolean("worlds." + worldKey + ".autoload", true)) {
-                    if (!this.unloadedWorlds.contains(worldKey)) {
-                        this.unloadedWorlds.add(worldKey);
-                    }
-                    continue;
-                }
-                // Grab the initial values from the config file.
-                String environment = this.configWorlds.getString("worlds." + worldKey + ".environment", "NORMAL");
-                String type = this.configWorlds.getString("worlds." + worldKey + ".type", "NORMAL");
-                String seedString = this.configWorlds.getString("worlds." + worldKey + ".seed", null);
-                if (seedString == null) {
-                    seedString = this.configWorlds.getLong("worlds." + worldKey + ".seed") + "";
-                }
-
-                String generatorString = this.configWorlds.getString("worlds." + worldKey + ".generator");
-                if (environment.equalsIgnoreCase("skylands")) {
-                    this.plugin.log(Level.WARNING, "Found SKYLANDS world. Not importing automatically, as it won't work atm :(");
-                    continue;
-                }
-                // TODO: UNCOMMENT BEFORE RELEASE
-                addWorld(worldKey, EnvironmentCommand.getEnvFromString(environment), seedString,
-                        EnvironmentCommand.getWorldTypeFromString(type), generatorString);
-
-                // Increment the world count
-                count++;
+        for (Map.Entry<String, WorldProperties> entry : worldsFromTheConfig.entrySet()) {
+            if (worlds.containsKey(entry.getKey())) {
+                continue;
             }
+            if (!entry.getValue().getAutoLoad())
+                continue;
+
+            if (doLoad(entry.getKey()))
+                count++;
         }
 
         // Simple Output to the Console to show how many Worlds were loaded.
-        this.plugin.log(Level.INFO, count + " - World(s) loaded.");
+        Logging.config("%s - World(s) loaded.", count);
+        this.saveWorldsConfig();
     }
 
     private void ensureSecondNamespaceIsPrepared() {
@@ -575,21 +741,72 @@ public class WorldManager implements MVWorldManager {
 
     /**
      * {@inheritDoc}
+     * @deprecated This is deprecated!
      */
     @Override
+    @Deprecated
     public PurgeWorlds getWorldPurger() {
-        return this.worldPurger;
+        return new PurgeWorlds(plugin);
     }
 
     /**
-     * Load the config from a file.
-     *
-     * @param file The file to load.
-     * @return A loaded configuration.
+     * {@inheritDoc}
+     */
+    @Override
+    public WorldPurger getTheWorldPurger() {
+        return worldPurger;
+    }
+
+    private static final char SEPARATOR = '\uF8FF';
+
+    public boolean isKeepingSpawnInMemory(World world) {
+        WorldProperties properties = worldsFromTheConfig.get(world.getName());
+        return properties == null || properties.isKeepingSpawnInMemory();
+    }
+
+    /**
+     * {@inheritDoc}
      */
     @Override
     public FileConfiguration loadWorldConfig(File file) {
         this.configWorlds = YamlConfiguration.loadConfiguration(file);
+        this.ensureConfigIsPrepared();
+        try {
+            this.configWorlds.save(new File(this.plugin.getDataFolder(), "worlds.yml"));
+        } catch (IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+        // load world-objects
+        Stack<String> worldKeys = new Stack<String>();
+        worldKeys.addAll(this.configWorlds.getConfigurationSection("worlds").getKeys(false));
+        Map<String, WorldProperties> newWorldsFromTheConfig = new HashMap<String, WorldProperties>();
+        while (!worldKeys.isEmpty()) {
+            String key = worldKeys.pop();
+            String path = "worlds" + SEPARATOR + key;
+            Object obj = this.configWorlds.get(path);
+            if ((obj != null) && (obj instanceof WorldProperties)) {
+                String worldName = key.replaceAll(String.valueOf(SEPARATOR), ".");
+                WorldProperties props = (WorldProperties) obj;
+                if (this.worldsFromTheConfig.containsKey(worldName)) {
+                    // Object-Recycling :D
+                    // TODO Why is is checking worldsFromTheConfig and then getting from worlds?  So confused... (DTM)
+                    MVWorld mvWorld = (MVWorld) this.worlds.get(worldName);
+                    if (mvWorld != null) {
+                        mvWorld.copyValues((WorldProperties) obj);
+                    }
+                }
+                newWorldsFromTheConfig.put(worldName, props);
+            } else if (this.configWorlds.isConfigurationSection(path)) {
+                ConfigurationSection section = this.configWorlds.getConfigurationSection(path);
+                Set<String> subkeys = section.getKeys(false);
+                for (String subkey : subkeys) {
+                    worldKeys.push(key + SEPARATOR + subkey);
+                }
+            }
+        }
+        this.worldsFromTheConfig = newWorldsFromTheConfig;
+        this.worlds.keySet().retainAll(this.worldsFromTheConfig.keySet());
         return this.configWorlds;
     }
 
@@ -599,6 +816,11 @@ public class WorldManager implements MVWorldManager {
     @Override
     public boolean saveWorldsConfig() {
         try {
+            this.configWorlds.options().pathSeparator(SEPARATOR);
+            this.configWorlds.set("worlds", null);
+            for (Map.Entry<String, WorldProperties> entry : worldsFromTheConfig.entrySet()) {
+                this.configWorlds.set("worlds" + SEPARATOR + entry.getKey(), entry.getValue());
+            }
             this.configWorlds.save(new File(this.plugin.getDataFolder(), "worlds.yml"));
             return true;
         } catch (IOException e) {
@@ -620,7 +842,50 @@ public class WorldManager implements MVWorldManager {
      */
     @Override
     public List<String> getUnloadedWorlds() {
-        return this.unloadedWorlds;
+        List<String> allNames = new ArrayList<String>(this.worldsFromTheConfig.keySet());
+        allNames.removeAll(worlds.keySet());
+        return allNames;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean regenWorld(String name, boolean useNewSeed, boolean randomSeed, String seed) {
+        MultiverseWorld world = this.getMVWorld(name);
+        if (world == null)
+            return false;
+
+        List<Player> ps = world.getCBWorld().getPlayers();
+
+        if (useNewSeed) {
+            long theSeed;
+
+            if (randomSeed) {
+                theSeed = new Random().nextLong();
+            } else {
+                try {
+                    theSeed = Long.parseLong(seed);
+                } catch (NumberFormatException e) {
+                    theSeed = seed.hashCode();
+                }
+            }
+
+            world.setSeed(theSeed);
+        }
+        WorldType type = world.getWorldType();
+
+        if (this.deleteWorld(name, false, false)) {
+            this.doLoad(name, true, type);
+            SafeTTeleporter teleporter = this.plugin.getSafeTTeleporter();
+            Location newSpawn = world.getSpawnLocation();
+            // Send all players that were in the old world, BACK to it!
+            for (Player p : ps) {
+                teleporter.safelyTeleport(null, p, newSpawn, true);
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -630,4 +895,17 @@ public class WorldManager implements MVWorldManager {
     public FileConfiguration getConfigWorlds() {
         return this.configWorlds;
     }
+
+	@Override
+	public boolean hasUnloadedWorld(String name, boolean includeLoaded) {
+		if (getMVWorld(name) != null) {
+			return includeLoaded;
+		}
+		for (Map.Entry<String, WorldProperties> entry : this.worldsFromTheConfig.entrySet()) {
+			if (name.equals(entry.getKey()) || name.equals(entry.getValue().getAlias())) {
+				return true;
+			}
+		}
+		return false;
+	}
 }
