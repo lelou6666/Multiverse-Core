@@ -23,7 +23,7 @@ public class DebugCommand extends MultiverseCommand {
     public DebugCommand(MultiverseCore plugin) {
         super(plugin);
         this.setName("Turn Debug on/off?");
-        this.setCommandUsage("/mv debug" + ChatColor.GOLD + " [1|2|3|off]");
+        this.setCommandUsage("/mv debug" + ChatColor.GOLD + " [1|2|3|off|silent]");
         this.setArgRange(0, 1);
         this.addKey("mv debug");
         this.addKey("mv d");
@@ -48,17 +48,18 @@ public class DebugCommand extends MultiverseCommand {
                     sender.sendMessage(ChatColor.RED + "Error" + ChatColor.WHITE
                             + " setting debug level. Please use a number 0-3 " + ChatColor.AQUA + "(3 being many many messages!)");
                 }
-
             }
+            plugin.saveMVConfigs();
         }
         this.displayDebugMode(sender);
     }
 
     private void displayDebugMode(CommandSender sender) {
-        if (plugin.getMVConfig().getGlobalDebug() == 0) {
+        final int debugLevel = plugin.getMVConfig().getGlobalDebug();
+        if (debugLevel == 0) {
             sender.sendMessage("Multiverse Debug mode is " + ChatColor.RED + "OFF");
         } else {
-            sender.sendMessage("Multiverse Debug mode is " + ChatColor.GREEN + plugin.getMVConfig().getGlobalDebug());
+            sender.sendMessage("Multiverse Debug mode is " + ChatColor.GREEN + debugLevel);
             this.plugin.log(Level.FINE, "Multiverse Debug ENABLED");
         }
     }

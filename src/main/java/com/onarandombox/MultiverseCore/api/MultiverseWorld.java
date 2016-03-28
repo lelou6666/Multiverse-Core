@@ -9,7 +9,6 @@ package com.onarandombox.MultiverseCore.api;
 
 import com.onarandombox.MultiverseCore.enums.AllowedPortalType;
 import com.onarandombox.MultiverseCore.exceptions.PropertyDoesNotExistException;
-
 import org.bukkit.ChatColor;
 import org.bukkit.Difficulty;
 import org.bukkit.GameMode;
@@ -287,6 +286,21 @@ public interface MultiverseWorld {
      * @return True if the color was set, false if not.
      */
     boolean setColor(String color);
+
+    /**
+     * Gets the style that this world's name/alias will display as.
+     *
+     * @return The style of this world. {@code null} for "normal" style.
+     */
+    ChatColor getStyle();
+
+    /**
+     * Sets the style that this world's name/alias will display as.
+     *
+     * @param style A valid style name.
+     * @return True if the style was set, false if not.
+     */
+    boolean setStyle(String style);
 
     /**
      * Tells you if someone entered a valid color.
@@ -607,6 +621,22 @@ public interface MultiverseWorld {
     void setBedRespawn(boolean autoLoad);
 
     /**
+     * Sets the player limit for this world after which players without an override
+     * permission node will not be allowed in. A value of -1 or less signifies no limit
+     *
+     * @param limit The new limit
+     */
+    void setPlayerLimit(int limit);
+
+    /**
+     * Gets the player limit for this world after which players without an override
+     * permission node will not be allowed in. A value of -1 or less signifies no limit
+     *
+     * @return The player limit
+     */
+    int getPlayerLimit();
+
+    /**
      * Same as {@link #getTime()}, but returns a string.
      * @return The time as a short string: 12:34pm
      */
@@ -656,6 +686,7 @@ public interface MultiverseWorld {
     String getAllPropertyNames();
 
     /**
+<<<<<<< HEAD
      * Gets whether or not flight is allowed in this world.
      * <p>
      * It should be noted that this refers to clientside flying. Creative
@@ -675,4 +706,18 @@ public interface MultiverseWorld {
      */
     void setFlightAllowed(boolean flightAllowed);
 
+=======
+     * Whether or not players are allowed to fly in this world.
+     *
+     * @return True if players allowed to fly in this world.
+     */
+    boolean getAllowFlight();
+
+    /**
+     * Sets whether or not players are allowed to fly in this world.
+     *
+     * @param allowFlight True to allow flight in this world.
+     */
+    void setAllowFlight(final boolean allowFlight);
+>>>>>>> refs/remotes/Multiverse/master
 }

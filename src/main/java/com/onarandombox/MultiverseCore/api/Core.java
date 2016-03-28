@@ -7,12 +7,17 @@
 
 package com.onarandombox.MultiverseCore.api;
 
-import com.fernferret.allpay.AllPay;
-import com.fernferret.allpay.GenericBank;
+import buscript.Buscript;
 import com.onarandombox.MultiverseCore.destination.DestinationFactory;
-import com.onarandombox.MultiverseCore.utils.*;
+import com.onarandombox.MultiverseCore.utils.AnchorManager;
+import com.onarandombox.MultiverseCore.utils.MVEconomist;
+import com.onarandombox.MultiverseCore.utils.MVPermissions;
+import com.onarandombox.MultiverseCore.utils.MVPlayerSession;
+import com.onarandombox.MultiverseCore.utils.SimpleBlockSafety;
+import com.onarandombox.MultiverseCore.utils.SimpleLocationManipulation;
+import com.onarandombox.MultiverseCore.utils.SimpleSafeTTeleporter;
+import com.onarandombox.MultiverseCore.utils.VaultHandler;
 import com.pneumaticraft.commandhandler.CommandHandler;
-import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 
 /**
@@ -23,20 +28,22 @@ import org.bukkit.entity.Player;
 public interface Core {
 
     /**
-     * Gets the Multiverse config file.
+     * Returns the Vault handler used by Multiverse.  The returned object will have all methods necessary for
+     * interfacing with Vault.
      *
-     * @return The Multiverse config file.
-     * @deprecated Don't modify the config-file manually!
+     * @return the Vault handler for Multiverse.
+     * @deprecated we are now using {@link #getEconomist()} for all economy needs.
      */
     @Deprecated
-    FileConfiguration getMVConfiguration();
+    VaultHandler getVaultHandler();
 
     /**
-     * Gets the Banking system that Multiverse-Core has hooked into.
+     * Retrieves Multiverse's friendly economist. The economist can be used for dealing with economies without
+     * worrying about any of the messy details.
      *
-     * @return A {@link GenericBank} that can be used for payments.
+     * @return the economy manager for Multiverse.
      */
-    GenericBank getBank();
+    MVEconomist getEconomist();
 
     /**
      * Reloads the Multiverse Configuration files:
@@ -101,7 +108,7 @@ public interface Core {
     /**
      * Gets the primary class responsible for managing Multiverse Worlds.
      *
-     * @return {@link WorldManager}.
+     * @return {@link MVWorldManager}.
      */
     MVWorldManager getMVWorldManager();
 
@@ -128,22 +135,11 @@ public interface Core {
      * @param seed The seed of the world.
      *
      * @return True if success, false if fail.
+     *
+     * @deprecated Use {@link MVWorldManager#regenWorld(String, boolean, boolean, String)} instead.
      */
+    @Deprecated
     Boolean regenWorld(String name, Boolean useNewSeed, Boolean randomSeed, String seed);
-
-    /**
-     * Sets the {@link GenericBank}-Bank AllPay is using.
-     *
-     * @param bank The new {@link GenericBank}
-     */
-    void setBank(GenericBank bank);
-
-    /**
-     * Gets this plugin's {@link AllPay}-Banker.
-     *
-     * @return An {@link AllPay}-Banker
-     */
-    AllPay getBanker();
 
     /**
      * Decrements the number of plugins that have specifically hooked into core.
@@ -222,4 +218,11 @@ public interface Core {
      * @return The configuration.
      */
     MultiverseCoreConfig getMVConfig();
+
+    /**
+     * Gets the buscript object for Multiverse.  This is what handles Javascript processing.
+     *
+     * @return The Multiverse buscript object.
+     */
+    Buscript getScriptAPI();
 }

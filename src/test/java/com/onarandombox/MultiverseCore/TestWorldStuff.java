@@ -5,15 +5,18 @@
  * with this project.                                                         *
  ******************************************************************************/
 
-package com.onarandombox.MultiverseCore.test;
+package com.onarandombox.MultiverseCore;
 
-import com.onarandombox.MultiverseCore.MultiverseCore;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
 import com.onarandombox.MultiverseCore.exceptions.PropertyDoesNotExistException;
-import com.onarandombox.MultiverseCore.test.utils.TestInstanceCreator;
-import com.onarandombox.MultiverseCore.test.utils.WorldCreatorMatcher;
+import com.onarandombox.MultiverseCore.utils.TestInstanceCreator;
+import com.onarandombox.MultiverseCore.utils.WorldCreatorMatcher;
 import com.onarandombox.MultiverseCore.utils.WorldManager;
-import org.bukkit.*;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.GameMode;
+import org.bukkit.Server;
+import org.bukkit.WorldCreator;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.permissions.Permission;
@@ -166,6 +169,35 @@ public class TestWorldStuff {
 
         WorldCreatorMatcher matcher = new WorldCreatorMatcher(new WorldCreator("newworld"));
         verify(mockServer).createWorld(Matchers.argThat(matcher));
+    }
+
+    @Test
+    public void testWorldCreateInvalidGenerator() {
+        // Pull a core instance from the server.
+        Plugin plugin = mockServer.getPluginManager().getPlugin("Multiverse-Core");
+
+        // Make sure Core is not null
+        assertNotNull(plugin);
+
+        // Make sure Core is enabled
+        assertTrue(plugin.isEnabled());
+
+        // Initialize a fake command
+        Command mockCommand = mock(Command.class);
+        when(mockCommand.getName()).thenReturn("mv");
+
+        // Ensure that there are no worlds imported. This is a fresh setup.
+        assertEquals(0, creator.getCore().getMVWorldManager().getMVWorlds().size());
+
+        // Create the world
+        String[] normalArgs = new String[]{ "create", "newworld", "normal", "-g", "BogusGen"};
+        plugin.onCommand(mockCommandSender, mockCommand, "", normalArgs);
+
+        // This command should halt, not creating any worlds
+        assertEquals(0, creator.getCore().getMVWorldManager().getMVWorlds().size());
+
+        // Verify
+        verify(mockCommandSender).sendMessage("Invalid generator! 'BogusGen'. " + ChatColor.RED + "Aborting world creation.");
     }
 
     @Test

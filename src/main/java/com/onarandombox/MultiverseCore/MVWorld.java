@@ -7,26 +7,19 @@
 
 package com.onarandombox.MultiverseCore;
 
+import com.dumptruckman.minecraft.util.Logging;
 import com.onarandombox.MultiverseCore.api.BlockSafety;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
-import com.onarandombox.MultiverseCore.configuration.EntryFee;
+import com.onarandombox.MultiverseCore.api.SafeTTeleporter;
 import com.onarandombox.MultiverseCore.configuration.SpawnLocation;
 import com.onarandombox.MultiverseCore.configuration.SpawnSettings;
 import com.onarandombox.MultiverseCore.configuration.WorldPropertyValidator;
 import com.onarandombox.MultiverseCore.enums.AllowedPortalType;
 import com.onarandombox.MultiverseCore.enums.EnglishChatColor;
 import com.onarandombox.MultiverseCore.exceptions.PropertyDoesNotExistException;
-import com.onarandombox.MultiverseCore.api.SafeTTeleporter;
-
 import me.main__.util.SerializationConfig.ChangeDeniedException;
-import me.main__.util.SerializationConfig.IllegalPropertyValueException;
 import me.main__.util.SerializationConfig.NoSuchPropertyException;
-import me.main__.util.SerializationConfig.Property;
-import me.main__.util.SerializationConfig.SerializationConfig;
-import me.main__.util.SerializationConfig.Serializor;
-import me.main__.util.SerializationConfig.ValidateAllWith;
 import me.main__.util.SerializationConfig.VirtualProperty;
-
 import org.bukkit.ChatColor;
 import org.bukkit.Difficulty;
 import org.bukkit.GameMode;
@@ -40,38 +33,176 @@ import org.bukkit.entity.Player;
 import org.bukkit.permissions.Permission;
 import org.bukkit.permissions.PermissionDefault;
 import org.bukkit.util.Vector;
+import org.json.simple.JSONObject;
 
-import java.lang.ref.Reference;
-import java.lang.ref.WeakReference;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.logging.Level;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * The implementation of a Multiverse handled world.
  */
-@SerializableAs("MVWorld")
-@ValidateAllWith(WorldPropertyValidator.class)
-public class MVWorld extends SerializationConfig implements MultiverseWorld {
+public class MVWorld implements MultiverseWorld {
     private static final int SPAWN_LOCATION_SEARCH_TOLERANCE = 16;
     private static final int SPAWN_LOCATION_SEARCH_RADIUS = 16;
+
+    private final MultiverseCore plugin; // Hold the Plugin Instance.
+    private final String name; // The Worlds Name, EG its folder name.
+    private final UUID worldUID;
+    private final WorldProperties props;
+
+    public MVWorld(MultiverseCore plugin, World world, WorldProperties properties) {
+        this(plugin, world, properties, true);
+    }
 
     /*
      * We have to use setCBWorld(), setPlugin() and initPerms() to prepare this object for use.
      */
-    public MVWorld(Map<String, Object> values) {
-        super(values);
+    public MVWorld(MultiverseCore plugin, World world, WorldProperties properties, boolean fixSpawn) {
+        this.plugin = plugin;
+        this.name = world.getName();
+        this.worldUID = world.getUID();
+        this.props = properties;
+
+        setupProperties();
+
+        if (!fixSpawn) {
+            props.setAdjustSpawn(false);
+        }
+
+        // Setup spawn separately so we can use the validator with the world spawn value..
+        final SpawnLocationPropertyValidator spawnValidator = new SpawnLocationPropertyValidator();
+        this.props.setValidator("spawn", spawnValidator);
+        this.props.spawnLocation.setWorld(world);
+        if (this.props.spawnLocation instanceof NullLocation) {
+            final SpawnLocation newLoc = new SpawnLocation(readSpawnFromWorld(world));
+            this.props.spawnLocation = newLoc;
+            world.setSpawnLocation(newLoc.getBlockX(), newLoc.getBlockY(), newLoc.getBlockZ());
+        }
+
+        this.props.environment = world.getEnvironment();
+        this.props.seed = world.getSeed();
+
+        this.initPerms();
+
+        this.props.flushChanges();
+
+        validateProperties();
     }
 
-    private MultiverseCore plugin; // Hold the Plugin Instance.
+    private void setupProperties() {
+        this.props.setMVWorld(this);
+        this.props.pvp = new VirtualProperty<Boolean>() {
+            @Override
+            public void set(Boolean newValue) {
+                final World world = getCBWorld();
+                if (world != null) {
+                    world.setPVP(newValue);
+                }
+            }
 
-    private Reference<World> world = new WeakReference<World>(null); // A reference to the World Instance.
-    private String name; // The Worlds Name, EG its folder name.
+            @Override
+            public Boolean get() {
+                final World world = getCBWorld();
+                return world != null ? world.getPVP() : null;
+            }
+        };
+
+        this.props.difficulty = new VirtualProperty<Difficulty>() {
+            @Override
+            public void set(Difficulty newValue) {
+                final World world = getCBWorld();
+                if (world != null) {
+                    world.setDifficulty(newValue);
+                }
+            }
+
+            @Override
+            public Difficulty get() {
+                final World world = getCBWorld();
+                return world != null ? world.getDifficulty() : null;
+            }
+        };
+
+        this.props.keepSpawnInMemory = new VirtualProperty<Boolean>() {
+            @Override
+            public void set(Boolean newValue) {
+                final World world = getCBWorld();
+                if (world != null) {
+                    world.setKeepSpawnInMemory(newValue);
+                }
+            }
+
+            @Override
+            public Boolean get() {
+                final World world = getCBWorld();
+                return world != null ? world.getKeepSpawnInMemory() : null;
+            }
+        };
+
+        this.props.spawn = new VirtualProperty<Location>() {
+            @Override
+            public void set(Location newValue) {
+                if (getCBWorld() != null)
+                    getCBWorld().setSpawnLocation(newValue.getBlockX(), newValue.getBlockY(), newValue.getBlockZ());
+
+                props.spawnLocation = new SpawnLocation(newValue);
+            }
+
+            @Override
+            public Location get() {
+                props.spawnLocation.setWorld(getCBWorld());
+                // basically, everybody should accept our "SpawnLocation", right?
+                // so just returning it should be fine
+                return props.spawnLocation;
+            }
+        };
+
+        this.props.time = new VirtualProperty<Long>() {
+            @Override
+            public void set(Long newValue) {
+                final World world = getCBWorld();
+                if (world != null) {
+                    world.setTime(newValue);
+                }
+            }
+
+            @Override
+            public Long get() {
+                final World world = getCBWorld();
+                return world != null ? world.getTime() : null;
+            }
+        };
+
+        this.props.setValidator("scale", new ScalePropertyValidator());
+        this.props.setValidator("respawnWorld", new RespawnWorldPropertyValidator());
+        this.props.setValidator("allowWeather", new AllowWeatherPropertyValidator());
+        this.props.setValidator("spawning", new SpawningPropertyValidator());
+        this.props.setValidator("gameMode", new GameModePropertyValidator());
+
+        //this.props.validate();
+    }
+
+    /**
+     * This method is here to provide a stopgap until the add/remove/clear methods are implemented with
+     * SerializationConfig.
+     */
+    public void validateEntitySpawns() {
+        setAllowAnimalSpawn(canAnimalsSpawn());
+        setAllowMonsterSpawn(canMonstersSpawn());
+    }
+
+    private void validateProperties() {
+        setPVPMode(isPVPEnabled());
+        setDifficulty(getDifficulty());
+        setKeepSpawnInMemory(isKeepingSpawnInMemory());
+        setScaling(getScaling());
+        setRespawnToWorld(this.props.getRespawnToWorld());
+        validateEntitySpawns();
+        setGameMode(getGameMode());
+    }
 
     /**
      * Validates the scale-property.
@@ -95,92 +226,13 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
         @Override
         public String validateChange(String property, String newValue, String oldValue,
                 MVWorld object) throws ChangeDeniedException {
-            if (!plugin.getMVWorldManager().isMVWorld(newValue))
+            if (!newValue.isEmpty() && !plugin.getMVWorldManager().isMVWorld(newValue))
                 throw new ChangeDeniedException();
             return super.validateChange(property, newValue, oldValue, object);
         }
     }
 
-    /**
-     * Serializor for the time-property.
-     */
-    private static final class TimePropertySerializor implements Serializor<Long, String> {
-        // BEGIN CHECKSTYLE-SUPPRESSION: MagicNumberCheck
-        private static final String TIME_REGEX = "(\\d\\d?):?(\\d\\d)(a|p)?m?";
-        private static final  Map<String, String> TIME_ALIASES;
-        static {
-            Map<String, String> staticTimes = new HashMap<String, String>();
-            staticTimes.put("morning", "8:00");
-            staticTimes.put("day", "12:00");
-            staticTimes.put("noon", "12:00");
-            staticTimes.put("midnight", "0:00");
-            staticTimes.put("night", "20:00");
 
-            // now set TIME_ALIASES to a "frozen" map
-            TIME_ALIASES = Collections.unmodifiableMap(staticTimes);
-        }
-
-        @Override
-        public String serialize(Long from) {
-            // I'm tired, so they get time in 24 hour for now.
-            // Someone else can add 12 hr format if they want :P
-
-            int hours = (int) ((from / 1000 + 8) % 24);
-            int minutes = (int) (60 * (from % 1000) / 1000);
-
-            return String.format("%d:%02d", hours, minutes);
-        }
-
-        @Override
-        public Long deserialize(String serialized, Class<Long> wanted) throws IllegalPropertyValueException {
-            if (TIME_ALIASES.containsKey(serialized.toLowerCase())) {
-                serialized = TIME_ALIASES.get(serialized.toLowerCase());
-            }
-            // Regex that extracts a time in the following formats:
-            // 11:11pm, 11:11, 23:11, 1111, 1111p, and the aliases at the top of this file.
-            Pattern pattern = Pattern.compile(TIME_REGEX, Pattern.CASE_INSENSITIVE);
-            Matcher matcher = pattern.matcher(serialized);
-            matcher.find();
-            int hour = 0;
-            double minute = 0;
-            int count = matcher.groupCount();
-            if (count >= 2) {
-                hour = Integer.parseInt(matcher.group(1));
-                minute = Integer.parseInt(matcher.group(2));
-            }
-            // If there were 4 matches (all, hour, min, am/pm)
-            if (count == 4) {
-                // We want 24 hour time for calcs, but if they
-                // added a p[m], turn it into a 24 hr one.
-                if (matcher.group(3).equals("p")) {
-                    hour += 12;
-                }
-            }
-            // Translate 24th hour to 0th hour.
-            if (hour == 24) {
-                hour = 0;
-            }
-            // Clamp the hour
-            if (hour > 23 || hour < 0) {
-                throw new IllegalPropertyValueException("Illegal hour!");
-            }
-            // Clamp the minute
-            if (minute > 59 || minute < 0) {
-                throw new IllegalPropertyValueException("Illegal minute!");
-            }
-            // 60 seconds in a minute, time needs to be in hrs * 1000, per
-            // the bukkit docs.
-            double totaltime = (hour + (minute / 60.0)) * 1000;
-            // Somehow there's an 8 hour offset...
-            totaltime -= 8000;
-            if (totaltime < 0) {
-                totaltime = 24000 + totaltime;
-            }
-
-            return (long) totaltime;
-        }
-        // END CHECKSTYLE-SUPPRESSION: MagicNumberCheck
-    }
 
     /**
      * Used to apply the allowWeather-property.
@@ -190,8 +242,11 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
         public Boolean validateChange(String property, Boolean newValue, Boolean oldValue,
                 MVWorld object) throws ChangeDeniedException {
             if (!newValue) {
-                world.get().setStorm(false);
-                world.get().setThundering(false);
+                final World world = getCBWorld();
+                if (world != null) {
+                    world.setStorm(false);
+                    world.setThundering(false);
+                }
             }
             return super.validateChange(property, newValue, oldValue, object);
         }
@@ -200,10 +255,10 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     /**
      * Used to apply the spawning-property.
      */
-    private final class SpawningPropertyValidator extends WorldPropertyValidator<Boolean> {
+    private final class SpawningPropertyValidator extends WorldPropertyValidator<SpawnSettings> {
         @Override
-        public Boolean validateChange(String property, Boolean newValue, Boolean oldValue,
-                MVWorld object) throws ChangeDeniedException {
+        public SpawnSettings validateChange(String property, SpawnSettings newValue, SpawnSettings oldValue,
+                                      MVWorld object) throws ChangeDeniedException {
             boolean allowMonsters, allowAnimals;
             if (getAnimalList().isEmpty()) {
                 allowAnimals = canAnimalsSpawn();
@@ -215,58 +270,20 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
             } else {
                 allowMonsters = true;
             }
-            world.get().setSpawnFlags(allowMonsters, allowAnimals);
+            final World world = getCBWorld();
+            if (world != null) {
+                if (MVWorld.this.props.getAnimalSpawnRate() != -1) {
+                    world.setTicksPerAnimalSpawns(MVWorld.this.props.getAnimalSpawnRate());
+                }
+                if (MVWorld.this.props.getMonsterSpawnRate() != -1) {
+                    world.setTicksPerMonsterSpawns(MVWorld.this.props.getMonsterSpawnRate());
+                }
+                world.setSpawnFlags(allowMonsters, allowAnimals);
+            }
             plugin.getMVWorldManager().getTheWorldPurger().purgeWorld(MVWorld.this);
             return super.validateChange(property, newValue, oldValue, object);
         }
     }
-
-    /**
-     * Serializor for the difficulty-property.
-     */
-    private static final class DifficultyPropertySerializor implements Serializor<Difficulty, String> {
-        @Override
-        public String serialize(Difficulty from) {
-            return from.toString();
-        }
-
-        @Override
-        public Difficulty deserialize(String serialized, Class<Difficulty> wanted) throws IllegalPropertyValueException {
-            try {
-                return Difficulty.getByValue(Integer.parseInt(serialized));
-            } catch (Exception e) {
-            }
-            try {
-                return Difficulty.valueOf(serialized.toUpperCase());
-            } catch (Exception e) {
-            }
-            throw new IllegalPropertyValueException();
-        }
-    }
-
-    /**
-     * Serializor for the gameMode-property.
-     */
-    private static final class GameModePropertySerializor implements Serializor<GameMode, String> {
-        @Override
-        public String serialize(GameMode from) {
-            return from.toString();
-        }
-
-        @Override
-        public GameMode deserialize(String serialized, Class<GameMode> wanted) throws IllegalPropertyValueException {
-            try {
-                return GameMode.getByValue(Integer.parseInt(serialized));
-            } catch (NumberFormatException nfe) {
-            }
-            try {
-                return GameMode.valueOf(serialized.toUpperCase());
-            } catch (Exception e) {
-            }
-            throw new IllegalPropertyValueException();
-        }
-    }
-
 
     /**
      * Used to apply the gameMode-property.
@@ -278,6 +295,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
             for (Player p : object.getCBWorld().getPlayers()) {
                 plugin.log(Level.FINER, String.format("Setting %s's GameMode to %s",
                         p.getName(), newValue.toString()));
+<<<<<<< HEAD
                 plugin.getPlayerListener().handleGameMode(p, object);
             }
             return super.validateChange(property, newValue, oldValue, object);
@@ -295,6 +313,9 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
                 plugin.log(Level.FINER, String.format("Setting %s's allowFlight to %s",
                         p.getName(), newValue));
                 plugin.getPlayerListener().handleAllowFlight(p, object);
+=======
+                plugin.getPlayerListener().handleGameModeAndFlight(p, MVWorld.this);
+>>>>>>> refs/remotes/Multiverse/master
             }
             return super.validateChange(property, newValue, oldValue, object);
         }
@@ -309,7 +330,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
                 MVWorld object) throws ChangeDeniedException {
             if (newValue == null)
                 throw new ChangeDeniedException();
-            if (adjustSpawn) {
+            if (props.getAdjustSpawn()) {
                 BlockSafety bs = plugin.getBlockSafety();
                 // verify that the location is safe
                 if (!bs.playerCanSpawnHereSafely(newValue)) {
@@ -330,6 +351,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
         }
     }
 
+<<<<<<< HEAD
     /**
      * Serializor for the color-property.
      */
@@ -467,24 +489,12 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     // End of properties
     // --------------------------------------------------------------
 
+=======
+>>>>>>> refs/remotes/Multiverse/master
     private Permission permission;
     private Permission exempt;
     private Permission ignoreperm;
-
-    public MVWorld(boolean fixSpawn) {
-        super();
-        if (!fixSpawn) {
-            this.adjustSpawn = false;
-        }
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public void copyValues(SerializationConfig other) {
-        super.copyValues(other);
-    }
+    private Permission limitbypassperm;
 
     /**
      * Null-location.
@@ -531,40 +541,6 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     }
 
     /**
-     * Sets the CB-World.
-     * <p>
-     * This is used to set some values after deserialization.
-     * @param cbWorld The new world.
-     * @param thePlugin The reference to the plugin.
-     */
-    public void init(World cbWorld, MultiverseCore thePlugin) {
-        this.plugin = thePlugin;
-
-        // Weak reference so the CB-World can be unloaded even if this object still exists!
-        this.world = new WeakReference<World>(cbWorld);
-        this.environment = cbWorld.getEnvironment();
-        this.seed = cbWorld.getSeed();
-        this.name = cbWorld.getName();
-        if (this.spawnLocation instanceof NullLocation)
-            this.spawnLocation = new SpawnLocation(readSpawnFromWorld(cbWorld));
-
-        this.initPerms();
-
-        this.flushPendingVPropChanges();
-    }
-
-    /**
-     * This prepares the MVWorld for unloading.
-     */
-    public void tearDown() {
-        try {
-            this.buildVPropChanges();
-        } catch (IllegalStateException e) {
-            // do nothing
-        }
-    }
-
-    /**
      * Initializes permissions.
      */
     private void initPerms() {
@@ -575,15 +551,21 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
 
         this.exempt = new Permission("multiverse.exempt." + this.getName(),
                 "A player who has this does not pay to enter this world, or use any MV portals in it " + this.getName(), PermissionDefault.OP);
+
+        this.limitbypassperm = new Permission("mv.bypass.playerlimit." + this.getName(),
+                "A player who can enter this world regardless of wether its full", PermissionDefault.OP);
         try {
             this.plugin.getServer().getPluginManager().addPermission(this.permission);
             this.plugin.getServer().getPluginManager().addPermission(this.exempt);
             this.plugin.getServer().getPluginManager().addPermission(this.ignoreperm);
+            this.plugin.getServer().getPluginManager().addPermission(this.limitbypassperm);
             // Add the permission and exempt to parents.
             this.addToUpperLists(this.permission);
 
             // Add ignore to it's parent:
             this.ignoreperm.addParent("mv.bypass.gamemode.*", true);
+            // Add limit bypass to it's parent
+            this.limitbypassperm.addParent("mv.bypass.playerlimit.*", true);
         } catch (IllegalArgumentException e) {
             this.plugin.log(Level.FINER, "Permissions nodes were already added for " + this.name);
         }
@@ -612,16 +594,16 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
             // Not sure how it will work in the nether...
             //Location newSpawn = this.spawnLocation.getWorld().getHighestBlockAt(this.spawnLocation).getLocation();
             if (newSpawn != null) {
-                this.plugin.log(Level.INFO, String.format("New Spawn for '%s' is located at: %s",
-                        this.getName(), plugin.getLocationManipulation().locationToString(newSpawn)));
+                Logging.info("New Spawn for '%s' is located at: %s",
+                        this.getName(), plugin.getLocationManipulation().locationToString(newSpawn));
                 return newSpawn;
             } else {
                 // If it's a standard end world, let's check in a better place:
                 Location newerSpawn;
                 newerSpawn = bs.getTopBlock(new Location(w, 0, 0, 0));
                 if (newerSpawn != null) {
-                    this.plugin.log(Level.INFO, String.format("New Spawn for '%s' is located at: %s",
-                            this.getName(), plugin.getLocationManipulation().locationToString(newerSpawn)));
+                    Logging.info("New Spawn for '%s' is located at: %s",
+                            this.getName(), plugin.getLocationManipulation().locationToString(newerSpawn));
                     return newerSpawn;
                 } else {
                     this.plugin.log(Level.SEVERE, "Safe spawn NOT found!!!");
@@ -631,6 +613,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
         return location;
     }
 
+<<<<<<< HEAD
     /**
      * {@inheritDoc}
      */
@@ -685,6 +668,8 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
         return 1.0;
     }
 
+=======
+>>>>>>> refs/remotes/Multiverse/master
     private void addToUpperLists(Permission perm) {
         Permission all = this.plugin.getServer().getPluginManager().getPermission("multiverse.*");
         Permission allWorlds = this.plugin.getServer().getPluginManager().getPermission("multiverse.access.*");
@@ -712,11 +697,31 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     }
 
     /**
+     * Copies all properties from another {@link MVWorld} object.
+     * @param other The other world object.
+     */
+    public void copyValues(MVWorld other) {
+        props.copyValues(other.props);
+    }
+
+    /**
+     * Copies all properties from a {@link WorldProperties} object.
+     * @param other The world properties object.
+     */
+    public void copyValues(WorldProperties other) {
+        props.copyValues(other);
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
     public World getCBWorld() {
-        return this.world.get();
+        final World world = plugin.getServer().getWorld(worldUID);
+        if (world == null) {
+            throw new IllegalStateException("Lost reference to bukkit world '" + name + "'");
+        }
+        return world;
     }
 
     /**
@@ -724,13 +729,20 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public String getColoredWorldString() {
-        if (alias.length() == 0) {
-            alias = this.getName();
+        if (props.getAlias().length() == 0) {
+            props.setAlias(this.getName());
         }
-        if ((color == null) || (color.getColor() == null)) {
-            this.setPropertyValueUnchecked("color", EnglishChatColor.WHITE);
+
+        if ((props.getColor() == null) || (props.getColor().getColor() == null)) {
+            this.props.setColor(EnglishChatColor.WHITE);
         }
-        return color.getColor() + alias + ChatColor.WHITE;
+
+        StringBuilder nameBuilder = new StringBuilder().append(props.getColor().getColor());
+        if (props.getStyle().getColor() != null)
+            nameBuilder.append(props.getStyle().getColor());
+        nameBuilder.append(props.getAlias()).append(ChatColor.WHITE).toString();
+
+        return nameBuilder.toString();
     }
 
     /**
@@ -756,6 +768,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
         if (list == null)
             return false;
         list.clear();
+        validateEntitySpawns();
         return true;
     }
 
@@ -771,6 +784,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
         if (list == null)
             return false;
         list.add(value);
+        validateEntitySpawns();
         return true;
     }
 
@@ -786,6 +800,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
         if (list == null)
             return false;
         list.remove(value);
+        validateEntitySpawns();
         return true;
     }
 
@@ -795,11 +810,11 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     @Deprecated
     private List<String> getOldAndEvilList(String property) {
         if (property.equalsIgnoreCase("worldblacklist"))
-            return this.worldBlacklist;
+            return this.props.getWorldBlacklist();
         else if (property.equalsIgnoreCase("animals"))
-            return this.spawning.getAnimalSettings().getExceptions();
+            return this.props.getAnimalList();
         else if (property.equalsIgnoreCase("monsters"))
-            return this.spawning.getMonsterSettings().getExceptions();
+            return this.props.getMonsterList();
         return null;
     }
 
@@ -832,7 +847,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     @Override
     public String getPropertyValue(String property) throws PropertyDoesNotExistException {
         try {
-            return this.getProperty(property, true);
+            return this.props.getProperty(property, true);
         } catch (NoSuchPropertyException e) {
             throw new PropertyDoesNotExistException(property, e);
         }
@@ -844,7 +859,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     @Override
     public boolean setPropertyValue(String property, String value) throws PropertyDoesNotExistException {
         try {
-            return this.setProperty(property, value, true);
+            return this.props.setProperty(property, value, true);
         } catch (NoSuchPropertyException e) {
             throw new PropertyDoesNotExistException(property, e);
         }
@@ -856,7 +871,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     @Override
     public String getPropertyHelp(String property) throws PropertyDoesNotExistException {
         try {
-            return this.getPropertyDescription(property, true);
+            return this.props.getPropertyDescription(property, true);
         } catch (NoSuchPropertyException e) {
             throw new PropertyDoesNotExistException(property, e);
         }
@@ -868,7 +883,8 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     @Override
     public WorldType getWorldType() {
         // This variable is not settable in-game, therefore does not get a property.
-        return world.get().getWorldType();
+        final World world = getCBWorld();
+        return world != null ? world.getWorldType() : null;
     }
 
     /**
@@ -876,7 +892,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public Environment getEnvironment() {
-        return this.environment;
+        return this.props.getEnvironment();
     }
 
     /**
@@ -884,7 +900,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setEnvironment(Environment environment) {
-        this.setPropertyValueUnchecked("environment", environment);
+        this.props.setEnvironment(environment);
     }
 
     /**
@@ -892,7 +908,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public long getSeed() {
-        return this.seed;
+        return this.props.getSeed();
     }
 
     /**
@@ -900,7 +916,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setSeed(long seed) {
-        this.setPropertyValueUnchecked("seed", seed);
+        this.props.setSeed(seed);
     }
 
     /**
@@ -908,7 +924,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public String getGenerator() {
-        return this.generator;
+        return this.props.getGenerator();
     }
 
     /**
@@ -916,7 +932,23 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setGenerator(String generator) {
-        this.setPropertyValueUnchecked("generator", generator);
+        this.props.setGenerator(generator);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public int getPlayerLimit() {
+        return this.props.getPlayerLimit();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setPlayerLimit(int limit) {
+        this.props.setPlayerLimit(limit);
     }
 
     /**
@@ -941,10 +973,10 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public String getAlias() {
-        if (this.alias == null || this.alias.length() == 0) {
+        if (this.props.getAlias() == null || this.props.getAlias().length() == 0) {
             return this.name;
         }
-        return this.alias;
+        return this.props.getAlias();
     }
 
     /**
@@ -952,7 +984,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setAlias(String alias) {
-        this.setPropertyValueUnchecked("alias", alias);
+        this.props.setAlias(alias);
     }
 
     /**
@@ -960,7 +992,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean canAnimalsSpawn() {
-        return this.spawning.getAnimalSettings().doSpawn();
+        return this.props.canAnimalsSpawn();
     }
 
     /**
@@ -968,7 +1000,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setAllowAnimalSpawn(boolean animals) {
-        this.setPropertyValueUnchecked("spawning.animals.spawn", animals);
+        this.props.setAllowAnimalSpawn(animals);
     }
 
     /**
@@ -977,7 +1009,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     @Override
     public List<String> getAnimalList() {
         // These don't fire events at the moment. Should they?
-        return this.spawning.getAnimalSettings().getExceptions();
+        return this.props.getAnimalList();
     }
 
     /**
@@ -985,7 +1017,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean canMonstersSpawn() {
-        return this.spawning.getMonsterSettings().doSpawn();
+        return this.props.canMonstersSpawn();
     }
 
     /**
@@ -993,7 +1025,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setAllowMonsterSpawn(boolean monsters) {
-        this.setPropertyValueUnchecked("spawning.monsters.spawn", monsters);
+        this.props.setAllowMonsterSpawn(monsters);
     }
 
     /**
@@ -1002,7 +1034,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     @Override
     public List<String> getMonsterList() {
         // These don't fire events at the moment. Should they?
-        return this.spawning.getMonsterSettings().getExceptions();
+        return this.props.getMonsterList();
     }
 
     /**
@@ -1010,7 +1042,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean isPVPEnabled() {
-        return this.pvp.get();
+        return this.props.isPVPEnabled();
     }
 
     /**
@@ -1018,7 +1050,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setPVPMode(boolean pvp) {
-        this.setPropertyValueUnchecked("pvp", pvp);
+        this.props.setPVPMode(pvp);
     }
 
     /**
@@ -1026,7 +1058,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean isHidden() {
-        return this.hidden;
+        return this.props.isHidden();
     }
 
     /**
@@ -1034,7 +1066,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setHidden(boolean hidden) {
-        this.setPropertyValueUnchecked("hidden", hidden);
+        this.props.setHidden(hidden);
     }
 
     /**
@@ -1042,7 +1074,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public List<String> getWorldBlacklist() {
-        return this.worldBlacklist;
+        return this.props.getWorldBlacklist();
     }
 
     /**
@@ -1050,7 +1082,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public double getScaling() {
-        return this.scale;
+        return this.props.getScaling();
     }
 
     /**
@@ -1058,7 +1090,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean setScaling(double scaling) {
-        return this.setPropertyValueUnchecked("scale", scaling);
+        return this.props.setScaling(scaling);
     }
 
     /**
@@ -1066,7 +1098,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean setColor(String aliasColor) {
-        return this.setPropertyUnchecked("color", aliasColor);
+        return props.setColor(aliasColor);
     }
 
     /**
@@ -1085,7 +1117,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public ChatColor getColor() {
-        return this.color.getColor();
+        return this.props.getColor().getColor();
     }
 
     /**
@@ -1104,7 +1136,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public World getRespawnToWorld() {
-        return this.plugin.getServer().getWorld(respawnWorld);
+        return this.plugin.getServer().getWorld(props.getRespawnToWorld());
     }
 
     /**
@@ -1113,7 +1145,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     @Override
     public boolean setRespawnToWorld(String respawnToWorld) {
         if (!this.plugin.getMVWorldManager().isMVWorld(respawnToWorld)) return false;
-        return this.setPropertyValueUnchecked("respawnWorld", respawnToWorld);
+        return this.props.setRespawnToWorld(respawnToWorld);
     }
 
     /**
@@ -1129,7 +1161,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public int getCurrency() {
-        return this.entryfee.getCurrency();
+        return this.props.getCurrency();
     }
 
     /**
@@ -1137,7 +1169,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setCurrency(int currency) {
-        this.setPropertyValueUnchecked("entryfee.currency", currency);
+        this.props.setCurrency(currency);
     }
 
     /**
@@ -1145,7 +1177,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public double getPrice() {
-        return this.entryfee.getAmount();
+        return this.props.getPrice();
     }
 
     /**
@@ -1153,7 +1185,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setPrice(double price) {
-        this.setPropertyValueUnchecked("entryfee.amount", price);
+        this.props.setPrice(price);
     }
 
     /**
@@ -1169,12 +1201,12 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean setGameMode(String mode) {
-        return this.setPropertyUnchecked("gameMode", mode);
+        return this.props.setGameMode(mode);
     }
 
     @Override
     public boolean setGameMode(GameMode mode) {
-        return this.setPropertyValueUnchecked("gameMode", mode);
+        return this.props.setGameMode(mode);
     }
 
     /**
@@ -1182,7 +1214,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public GameMode getGameMode() {
-        return this.gameMode;
+        return this.props.getGameMode();
     }
 
     /**
@@ -1190,7 +1222,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setEnableWeather(boolean weather) {
-        this.setPropertyValueUnchecked("allowWeather", weather);
+        this.props.setEnableWeather(weather);
     }
 
     /**
@@ -1198,7 +1230,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean isWeatherEnabled() {
-        return this.allowWeather;
+        return this.props.isWeatherEnabled();
     }
 
     /**
@@ -1206,7 +1238,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean isKeepingSpawnInMemory() {
-        return this.keepSpawnInMemory.get();
+        return this.props.isKeepingSpawnInMemory();
     }
 
     /**
@@ -1214,7 +1246,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setKeepSpawnInMemory(boolean value) {
-        this.setPropertyValueUnchecked("keepSpawnInMemory", value);
+        this.props.setKeepSpawnInMemory(value);
     }
 
     /**
@@ -1222,7 +1254,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean getHunger() {
-        return this.hunger;
+        return this.props.getHunger();
     }
 
     /**
@@ -1230,7 +1262,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setHunger(boolean hunger) {
-        this.setPropertyValueUnchecked("hunger", hunger);
+        this.props.setHunger(hunger);
     }
 
     /**
@@ -1238,7 +1270,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public Location getSpawnLocation() {
-        return this.spawn.get();
+        return this.props.getSpawnLocation();
     }
 
     /**
@@ -1246,7 +1278,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setSpawnLocation(Location l) {
-        this.setPropertyValueUnchecked("spawn", l);
+        this.props.setSpawnLocation(l);
     }
 
     /**
@@ -1254,7 +1286,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public Difficulty getDifficulty() {
-        return this.difficulty.get();
+        return this.props.getDifficulty();
     }
 
     /**
@@ -1265,12 +1297,12 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
     @Override
     @Deprecated
     public boolean setDifficulty(String difficulty) {
-        return this.setPropertyUnchecked("difficulty", difficulty);
+        return this.props.setDifficulty(difficulty);
     }
 
     @Override
     public boolean setDifficulty(Difficulty difficulty) {
-        return this.setPropertyValueUnchecked("difficulty", difficulty);
+        return this.props.setDifficulty(difficulty);
     }
 
     /**
@@ -1278,7 +1310,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean getAutoHeal() {
-        return this.autoHeal;
+        return this.props.getAutoHeal();
     }
 
     /**
@@ -1286,7 +1318,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setAutoHeal(boolean heal) {
-        this.setPropertyValueUnchecked("autoHeal", heal);
+        this.props.setAutoHeal(heal);
     }
 
     /**
@@ -1294,7 +1326,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setAdjustSpawn(boolean adjust) {
-        this.setPropertyValueUnchecked("adjustSpawn", adjust);
+        this.props.setAdjustSpawn(adjust);
     }
 
     /**
@@ -1302,7 +1334,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean getAdjustSpawn() {
-        return this.adjustSpawn;
+        return this.props.getAdjustSpawn();
     }
 
     /**
@@ -1310,7 +1342,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setAutoLoad(boolean load) {
-        this.setPropertyValueUnchecked("autoLoad", load);
+        this.props.setAutoLoad(load);
     }
 
     /**
@@ -1318,7 +1350,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean getAutoLoad() {
-        return this.autoLoad;
+        return this.props.getAutoLoad();
     }
 
     /**
@@ -1326,7 +1358,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void setBedRespawn(boolean respawn) {
-        this.setPropertyValueUnchecked("bedRespawn", respawn);
+        this.props.setBedRespawn(respawn);
     }
 
     /**
@@ -1334,7 +1366,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean getBedRespawn() {
-        return this.bedRespawn;
+        return this.props.getBedRespawn();
     }
 
     /**
@@ -1342,14 +1374,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public String getAllPropertyNames() {
-        ChatColor myColor = ChatColor.AQUA;
-        StringBuilder result = new StringBuilder();
-        Map<String, Object> serialized = this.serialize();
-        for (String key : serialized.keySet()) {
-            result.append(myColor).append(key).append(' ');
-            myColor = (myColor == ChatColor.AQUA) ? ChatColor.GOLD : ChatColor.AQUA;
-        }
-        return result.toString();
+        return this.props.getAllPropertyNames();
     }
 
     /**
@@ -1357,7 +1382,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public String getTime() {
-        return this.getPropertyUnchecked("time");
+        return this.props.getTime();
     }
 
     /**
@@ -1365,7 +1390,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public boolean setTime(String timeAsString) {
-        return this.setPropertyUnchecked("time", timeAsString);
+        return this.props.setTime(timeAsString);
     }
 
     /**
@@ -1373,7 +1398,7 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public AllowedPortalType getAllowedPortals() {
-        return portalForm;
+        return props.getAllowedPortals();
     }
 
     /**
@@ -1381,7 +1406,39 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
      */
     @Override
     public void allowPortalMaking(AllowedPortalType portalType) {
-        this.setPropertyValueUnchecked("portalForm", portalType);
+        this.props.allowPortalMaking(portalType);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public ChatColor getStyle() {
+        return this.props.getStyle().getColor();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean setStyle(String style) {
+        return this.props.setStyle(style);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean getAllowFlight() {
+        return this.props.getAllowFlight();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setAllowFlight(final boolean allowFlight) {
+        this.props.setAllowFlight(allowFlight);
     }
 
     /**
@@ -1402,11 +1459,13 @@ public class MVWorld extends SerializationConfig implements MultiverseWorld {
 
     @Override
     public String toString() {
-        StringBuilder toStringBuilder = new StringBuilder();
-        toStringBuilder.append(this.getClass().getSimpleName());
-        toStringBuilder.append('@');
-        toStringBuilder.append(this.hashCode());
-        toStringBuilder.append(" (Name: '").append(this.getName()).append("')");
-        return toStringBuilder.toString();
+        final JSONObject jsonData = new JSONObject();
+        jsonData.put("Name", getName());
+        jsonData.put("Env", getEnvironment().toString());
+        jsonData.put("Type", getWorldType().toString());
+        jsonData.put("Gen", getGenerator());
+        final JSONObject topLevel = new JSONObject();
+        topLevel.put(getClass().getSimpleName() + "@" + hashCode(), jsonData);
+        return topLevel.toString();
     }
 }
