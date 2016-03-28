@@ -9,7 +9,6 @@ package com.onarandombox.MultiverseCore.api;
 
 import com.onarandombox.MultiverseCore.utils.PurgeWorlds;
 import com.onarandombox.MultiverseCore.utils.SimpleWorldPurger;
-
 import org.bukkit.World;
 import org.bukkit.World.Environment;
 import org.bukkit.WorldType;
@@ -65,16 +64,30 @@ public interface MVWorldManager {
      *
      * @param oldName            Name of world to be copied
      * @param newName            Name of world to be created
-     * @param generator          The Custom generator plugin to use.
+     * @param generator          The Custom generator plugin to use. Ignored.
      * @return True if the world is copied successfully, false if not.
+     * @deprecated Use {@link #cloneWorld(String, String)} instead.
      */
+    @Deprecated
     boolean cloneWorld(String oldName, String newName, String generator);
 
     /**
-     * Remove the world from the Multiverse list, from the
-     * config and deletes the folder.
+     * Make a copy of a world.
      *
-     * @param name The name of the world to remove
+     * @param oldName
+     *            Name of world to be copied
+     * @param newName
+     *            Name of world to be created
+     * @return True if the world is copied successfully, false if not.
+     */
+    boolean cloneWorld(String oldName, String newName);
+
+    /**
+     * Remove the world from the Multiverse list, from the config and deletes
+     * the folder.
+     *
+     * @param name
+     *            The name of the world to remove
      * @return True if success, false if failure.
      */
     boolean deleteWorld(String name);
@@ -108,6 +121,15 @@ public interface MVWorldManager {
      * @return True if the world was unloaded, false if not.
      */
     boolean unloadWorld(String name);
+
+    /**
+     * Unload a world from Multiverse with option to prevent calling unloadWorld in Bukkit.
+     *
+     * @param name Name of the world to unload
+     * @param unloadBukkit True if Bukkit world should be unloaded
+     * @return True if the world was unloaded, false if not.
+     */
+    boolean unloadWorld(String name, boolean unloadBukkit);
 
     /**
      * Loads the world. Only use this if the world has been
@@ -278,4 +300,18 @@ public interface MVWorldManager {
      * @return True if success, false if fail.
      */
     boolean regenWorld(String name, boolean useNewSeed, boolean randomSeed, String seed);
+
+    boolean isKeepingSpawnInMemory(World world);
+    
+    /**
+     * Checks whether Multiverse knows about a provided unloaded world. This
+     * method will check the parameter against the alias mappings.
+     *
+     * @param name The name of the unloaded world
+     * @param includeLoaded The value to return if the world is loaded
+     *
+     * @return True if the world exists and is unloaded. False if the world
+     * does not exist. {@code includeLoaded} if the world exists and is loaded.
+     */
+    boolean hasUnloadedWorld(String name, boolean includeLoaded);
 }

@@ -7,11 +7,15 @@
 
 package com.onarandombox.MultiverseCore.utils;
 
+import com.dumptruckman.minecraft.util.Logging;
 import com.onarandombox.MultiverseCore.MultiverseCore;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
 import com.onarandombox.MultiverseCore.api.WorldPurger;
+<<<<<<< HEAD
 import com.onarandombox.MultiverseCore.localization.MultiverseMessage;
 
+=======
+>>>>>>> refs/remotes/Multiverse/master
 import org.bukkit.World;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Animals;
@@ -19,13 +23,15 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Ghast;
 import org.bukkit.entity.Golem;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Monster;
+import org.bukkit.entity.Projectile;
 import org.bukkit.entity.Slime;
 import org.bukkit.entity.Squid;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
-import java.util.logging.Level;
 
 /**
  * Utility class that removes animals from worlds that don't belong there.
@@ -34,8 +40,16 @@ public class SimpleWorldPurger implements WorldPurger {
 
     private MultiverseCore plugin;
 
+    private Class<Entity> ambientClass = null;
+
     public SimpleWorldPurger(MultiverseCore plugin) {
         this.plugin = plugin;
+        try {
+            Class entityClass = Class.forName("org.bukkit.entity.Ambient");
+            if (Entity.class.isAssignableFrom(entityClass)) {
+                ambientClass = entityClass;
+            }
+        } catch (ClassNotFoundException ignore) { }
     }
 
     /**
@@ -87,28 +101,58 @@ public class SimpleWorldPurger implements WorldPurger {
         if (world == null) {
             return;
         }
+        int projectilesKilled = 0;
         int entitiesKilled = 0;
         boolean specifiedAll = thingsToKill.contains("ALL");
         boolean specifiedAnimals = thingsToKill.contains("ANIMALS") || specifiedAll;
         boolean specifiedMonsters = thingsToKill.contains("MONSTERS") || specifiedAll;
-        for (Entity e : world.getEntities()) {
+        List<Entity> worldEntities = world.getEntities();
+        List<LivingEntity> livingEntities = new ArrayList<LivingEntity>(worldEntities.size());
+        List<Projectile> projectiles = new ArrayList<Projectile>(worldEntities.size());
+        for (final Entity e : worldEntities) {
+            if (e instanceof Projectile) {
+                final Projectile p = (Projectile) e;
+                if (p.getShooter() != null) {
+                    projectiles.add((Projectile) e);
+                }
+            } else if (e instanceof LivingEntity) {
+                livingEntities.add((LivingEntity) e);
+            }
+        }
+        for (final LivingEntity e : livingEntities) {
             if (killDecision(e, thingsToKill, negateAnimals, negateMonsters, specifiedAnimals, specifiedMonsters)) {
+                final Iterator<Projectile> it = projectiles.iterator();
+                while (it.hasNext()) {
+                    final Projectile p = it.next();
+                    if (p.getShooter().equals(e)) {
+                        p.remove();
+                        it.remove();
+                        projectilesKilled++;
+                    }
+                }
                 e.remove();
                 entitiesKilled++;
             }
         }
+<<<<<<< HEAD
         if (sender != null)
             this.plugin.getMessaging().sendMessage(sender, MultiverseMessage.PURGER_ENTITIESKILLED, entitiesKilled, world.getName());
+=======
+        if (sender != null) {
+            sender.sendMessage(entitiesKilled + " entities purged from the world '" + world.getName() + "' along with " + projectilesKilled + " projectiles that belonged to them.");
+        }
+>>>>>>> refs/remotes/Multiverse/master
     }
 
     private boolean killDecision(Entity e, List<String> thingsToKill, boolean negateAnimals,
             boolean negateMonsters, boolean specifiedAnimals, boolean specifiedMonsters) {
         boolean negate = false;
         boolean specified = false;
-        if (e instanceof Golem || e instanceof Squid || e instanceof Animals) {
+        if (e instanceof Golem || e instanceof Squid || e instanceof Animals
+                || (ambientClass != null && ambientClass.isInstance(e))) {
             // it's an animal
             if (specifiedAnimals && !negateAnimals) {
-                this.plugin.log(Level.FINEST, "Removing an entity because I was told to remove all animals: " + e);
+                Logging.finest("Removing an entity because I was told to remove all animals in world %s: %s", e.getWorld().getName(), e);
                 return true;
             }
             if (specifiedAnimals)
@@ -117,7 +161,7 @@ public class SimpleWorldPurger implements WorldPurger {
         } else if (e instanceof Monster || e instanceof Ghast || e instanceof Slime) {
             // it's a monster
             if (specifiedMonsters && !negateMonsters) {
-                this.plugin.log(Level.FINEST, "Removing an entity because I was told to remove all monsters: " + e);
+                Logging.finest("Removing an entity because I was told to remove all monsters in world %s: %s", e.getWorld().getName(), e);
                 return true;
             }
             if (specifiedMonsters)
@@ -129,14 +173,14 @@ public class SimpleWorldPurger implements WorldPurger {
             if (type != null && type.equals(e.getType())) {
                 specified = true;
                 if (!negate) {
-                    this.plugin.log(Level.FINEST, "Removing an entity because it WAS specified and we are NOT negating: " + e);
+                    Logging.finest("Removing an entity because it WAS specified and we are NOT negating in world %s: %s", e.getWorld().getName(), e);
                     return true;
                 }
                 break;
             }
         }
         if (!specified && negate) {
-            this.plugin.log(Level.FINEST, "Removing an entity because it was NOT specified and we ARE negating: " + e);
+            Logging.finest("Removing an entity because it was NOT specified and we ARE negating in world %s: %s", e.getWorld().getName(), e);
             return true;
         }
 

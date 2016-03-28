@@ -1,5 +1,6 @@
 package com.onarandombox.MultiverseCore;
 
+<<<<<<< HEAD
 import com.dumptruckman.minecraft.util.Logging;
 import com.onarandombox.MultiverseCore.api.MultiverseCoreConfig;
 import com.onarandombox.MultiverseCore.configuration.LocaleSerializor;
@@ -9,6 +10,13 @@ import me.main__.util.SerializationConfig.Property;
 import me.main__.util.SerializationConfig.SerializationConfig;
 import java.util.Locale;
 import java.util.Map;
+=======
+import com.dumptruckman.minecraft.util.*;
+import com.onarandombox.MultiverseCore.api.*;
+import me.main__.util.SerializationConfig.*;
+
+import java.util.*;
+>>>>>>> refs/remotes/Multiverse/master
 
 /**
  * Our configuration.
@@ -46,6 +54,8 @@ public class MultiverseCoreConfiguration extends SerializationConfig implements 
     @Property
     private volatile boolean prefixchat;
     @Property
+    private volatile String prefixchatformat;
+    @Property
     private volatile boolean useasyncchat;
     @Property
     private volatile boolean teleportintercept;
@@ -65,8 +75,15 @@ public class MultiverseCoreConfiguration extends SerializationConfig implements 
     private volatile String firstspawnworld;
     @Property
     private volatile int teleportcooldown;
+<<<<<<< HEAD
     @Property(serializor = LocaleSerializor.class)
     private volatile Locale locale;
+=======
+    @Property
+    private volatile boolean defaultportalsearch;
+    @Property
+    private volatile int portalsearchradius;
+>>>>>>> refs/remotes/Multiverse/master
 
     public MultiverseCoreConfiguration() {
         super();
@@ -87,6 +104,7 @@ public class MultiverseCoreConfiguration extends SerializationConfig implements 
         enforceaccess = false;
         useasyncchat = true;
         prefixchat = true;
+        prefixchatformat = "[%world%]%chat%";
         teleportintercept = true;
         firstspawnoverride = true;
         displaypermerrors = true;
@@ -95,6 +113,8 @@ public class MultiverseCoreConfiguration extends SerializationConfig implements 
         teleportcooldown = 1000;
         this.version = 2.9;
         silentstart = false;
+        defaultportalsearch = false;
+        portalsearchradius = 128;
         // END CHECKSTYLE-SUPPRESSION: MagicNumberCheck
     }
 
@@ -142,6 +162,22 @@ public class MultiverseCoreConfiguration extends SerializationConfig implements 
     @Override
     public void setPrefixChat(boolean prefixChat) {
         this.prefixchat = prefixChat;
+    }
+    
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public String getPrefixChatFormat() {
+        return this.prefixchatformat;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setPrefixChatFormat(String prefixChatFormat) {
+        this.prefixchatformat = prefixChatFormat;
     }
 
     /**
@@ -302,5 +338,25 @@ public class MultiverseCoreConfiguration extends SerializationConfig implements 
     @Override
     public boolean getSilentStart() {
         return silentstart;
+    }
+
+    @Override
+    public void setUseDefaultPortalSearch(boolean useDefaultPortalSearch) {
+        defaultportalsearch = useDefaultPortalSearch;
+    }
+
+    @Override
+    public boolean isUsingDefaultPortalSearch() {
+        return defaultportalsearch;
+    }
+
+    @Override
+    public void setPortalSearchRadius(int searchRadius) {
+        this.portalsearchradius = searchRadius;
+    }
+
+    @Override
+    public int getPortalSearchRadius() {
+        return portalsearchradius;
     }
 }
