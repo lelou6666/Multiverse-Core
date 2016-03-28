@@ -12,6 +12,7 @@ import com.onarandombox.MultiverseCore.api.BlockSafety;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
 import com.onarandombox.MultiverseCore.api.SafeTTeleporter;
 import com.onarandombox.MultiverseCore.configuration.SpawnLocation;
+import com.onarandombox.MultiverseCore.configuration.SpawnSettings;
 import com.onarandombox.MultiverseCore.configuration.WorldPropertyValidator;
 import com.onarandombox.MultiverseCore.enums.AllowedPortalType;
 import com.onarandombox.MultiverseCore.enums.EnglishChatColor;
@@ -184,14 +185,22 @@ public class MVWorld implements MultiverseWorld {
         //this.props.validate();
     }
 
+    /**
+     * This method is here to provide a stopgap until the add/remove/clear methods are implemented with
+     * SerializationConfig.
+     */
+    public void validateEntitySpawns() {
+        setAllowAnimalSpawn(canAnimalsSpawn());
+        setAllowMonsterSpawn(canMonstersSpawn());
+    }
+
     private void validateProperties() {
         setPVPMode(isPVPEnabled());
         setDifficulty(getDifficulty());
         setKeepSpawnInMemory(isKeepingSpawnInMemory());
         setScaling(getScaling());
         setRespawnToWorld(this.props.getRespawnToWorld());
-        setAllowAnimalSpawn(canAnimalsSpawn());
-        setAllowMonsterSpawn(canMonstersSpawn());
+        validateEntitySpawns();
         setGameMode(getGameMode());
     }
 
@@ -246,10 +255,10 @@ public class MVWorld implements MultiverseWorld {
     /**
      * Used to apply the spawning-property.
      */
-    private final class SpawningPropertyValidator extends WorldPropertyValidator<Boolean> {
+    private final class SpawningPropertyValidator extends WorldPropertyValidator<SpawnSettings> {
         @Override
-        public Boolean validateChange(String property, Boolean newValue, Boolean oldValue,
-                MVWorld object) throws ChangeDeniedException {
+        public SpawnSettings validateChange(String property, SpawnSettings newValue, SpawnSettings oldValue,
+                                      MVWorld object) throws ChangeDeniedException {
             boolean allowMonsters, allowAnimals;
             if (getAnimalList().isEmpty()) {
                 allowAnimals = canAnimalsSpawn();
@@ -542,6 +551,7 @@ public class MVWorld implements MultiverseWorld {
         if (list == null)
             return false;
         list.clear();
+        validateEntitySpawns();
         return true;
     }
 
@@ -557,6 +567,7 @@ public class MVWorld implements MultiverseWorld {
         if (list == null)
             return false;
         list.add(value);
+        validateEntitySpawns();
         return true;
     }
 
@@ -572,6 +583,7 @@ public class MVWorld implements MultiverseWorld {
         if (list == null)
             return false;
         list.remove(value);
+        validateEntitySpawns();
         return true;
     }
 
